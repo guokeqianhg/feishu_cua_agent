@@ -1,0 +1,13 @@
+id: im_send_message_001
+name: Search test group and send message
+product: im
+instruction: "在IM中搜索「测试群」，发送一条消息「Hello World」，并确认发送成功"
+preconditions:
+  - Feishu desktop client is logged in.
+  - The current account can access the target group.
+expected_result: "The latest chat history contains Hello World from the current user."
+tags:
+  - im
+  - smoke
+  - e2e
+timeout_seconds: 300

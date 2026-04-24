@@ -1,0 +1,13 @@
+id: calendar_create_event_001
+name: Create tomorrow afternoon meeting
+product: calendar
+instruction: "打开日历，创建一个明天下午2点的会议，邀请张三参加"
+preconditions:
+  - Feishu desktop client is logged in.
+  - The contact 张三 exists in the organization directory.
+expected_result: "Calendar shows a meeting tomorrow at 2 PM with 张三 as attendee."
+tags:
+  - calendar
+  - smoke
+  - e2e
+timeout_seconds: 300

@@ -1,0 +1,292 @@
+{
+  "run_id": "2e8be1e33b8d47849af0d6f3317c9efa",
+  "case_id": "calendar_create_event_001",
+  "case_name": "Create tomorrow afternoon meeting",
+  "product": "calendar",
+  "instruction": "打开日历，创建一个明天下午2点的会议，邀请张三参加",
+  "status": "pass",
+  "started_at": 1777007796.6375883,
+  "ended_at": 1777007798.1954193,
+  "duration_seconds": 1.557831048965454,
+  "metrics": {
+    "total_steps": 5,
+    "passed_steps": 5,
+    "failed_steps": 0,
+    "skipped_steps": 0,
+    "retry_count": 0,
+    "replan_count": 0,
+    "success_rate": 1.0,
+    "product_coverage": [
+      "calendar"
+    ],
+    "evidence_complete": true
+  },
+  "step_records": [
+    {
+      "step_id": "open_calendar",
+      "step_index": 1,
+      "attempt": 1,
+      "action": "click",
+      "target_description": "Calendar entry in Lark sidebar",
+      "status": "pass",
+      "started_at": 1777007796.936636,
+      "ended_at": 1777007797.0786362,
+      "duration_seconds": 0.1420001983642578,
+      "located_target": {
+        "step_id": "open_calendar",
+        "target_description": "Calendar entry in Lark sidebar",
+        "source": "mock",
+        "bbox": {
+          "x1": 20,
+          "y1": 90,
+          "x2": 110,
+          "y2": 140
+        },
+        "center": [
+          65,
+          115
+        ],
+        "confidence": 0.75,
+        "reason": "Mock matched target: Calendar entry in Lark sidebar",
+        "metadata": {}
+      },
+      "action_result": {
+        "success": true,
+        "message": "[DRY_RUN] click target=Calendar entry in Lark sidebar",
+        "action": "click",
+        "executed_at": 1777007796.9506361,
+        "dry_run": true,
+        "error_message": null
+      },
+      "verification": {
+        "success": true,
+        "confidence": 0.85,
+        "reason": "Mock verification passed for step open_calendar: Calendar page is open",
+        "matched_criteria": [
+          "Calendar page is open"
+        ],
+        "failed_criteria": [],
+        "failure_category": "none",
+        "raw_model_output": {
+          "provider": "mock"
+        }
+      },
+      "before_screenshot": "runs\\reports\\run_20260424_131636_2e8be1e3\\screenshots\\001_open_calendar_before_a1.png",
+      "after_screenshot": "runs\\reports\\run_20260424_131636_2e8be1e3\\screenshots\\001_open_calendar_after_a1.png",
+      "error_message": null
+    },
+    {
+      "step_id": "create_event",
+      "step_index": 2,
+      "attempt": 1,
+      "action": "click",
+      "target_description": "create event button or target time slot",
+      "status": "pass",
+      "started_at": 1777007797.2087069,
+      "ended_at": 1777007797.3605523,
+      "duration_seconds": 0.15184545516967773,
+      "located_target": {
+        "step_id": "create_event",
+        "target_description": "create event button or target time slot",
+        "source": "mock",
+        "bbox": {
+          "x1": 20,
+          "y1": 90,
+          "x2": 110,
+          "y2": 140
+        },
+        "center": [
+          65,
+          115
+        ],
+        "confidence": 0.75,
+        "reason": "Mock matched target: create event button or target time slot",
+        "metadata": {}
+      },
+      "action_result": {
+        "success": true,
+        "message": "[DRY_RUN] click target=create event button or target time slot",
+        "action": "click",
+        "executed_at": 1777007797.2217078,
+        "dry_run": true,
+        "error_message": null
+      },
+      "verification": {
+        "success": true,
+        "confidence": 0.85,
+        "reason": "Mock verification passed for step create_event: event editor is open",
+        "matched_criteria": [
+          "event editor is open"
+        ],
+        "failed_criteria": [],
+        "failure_category": "none",
+        "raw_model_output": {
+          "provider": "mock"
+        }
+      },
+      "before_screenshot": "runs\\reports\\run_20260424_131636_2e8be1e3\\screenshots\\002_create_event_before_a1.png",
+      "after_screenshot": "runs\\reports\\run_20260424_131636_2e8be1e3\\screenshots\\002_create_event_after_a1.png",
+      "error_message": null
+    },
+    {
+      "step_id": "type_event",
+      "step_index": 3,
+      "attempt": 1,
+      "action": "type_text",
+      "target_description": "event title or attendee field",
+      "status": "pass",
+      "started_at": 1777007797.4891236,
+      "ended_at": 1777007797.6361217,
+      "duration_seconds": 0.14699816703796387,
+      "located_target": {
+        "step_id": "type_event",
+        "target_description": null,
+        "source": "none",
+        "bbox": null,
+        "center": null,
+        "confidence": 1.0,
+        "reason": "Action does not require pointer location.",
+        "metadata": {}
+      },
+      "action_result": {
+        "success": true,
+        "message": "[DRY_RUN] type_text target=event title or attendee field",
+        "action": "type_text",
+        "executed_at": 1777007797.5021236,
+        "dry_run": true,
+        "error_message": null
+      },
+      "verification": {
+        "success": true,
+        "confidence": 0.85,
+        "reason": "Mock verification passed for step type_event: event details are filled",
+        "matched_criteria": [
+          "event details are filled"
+        ],
+        "failed_criteria": [],
+        "failure_category": "none",
+        "raw_model_output": {
+          "provider": "mock"
+        }
+      },
+      "before_screenshot": "runs\\reports\\run_20260424_131636_2e8be1e3\\screenshots\\003_type_event_before_a1.png",
+      "after_screenshot": "runs\\reports\\run_20260424_131636_2e8be1e3\\screenshots\\003_type_event_after_a1.png",
+      "error_message": null
+    },
+    {
+      "step_id": "save_event",
+      "step_index": 4,
+      "attempt": 1,
+      "action": "click",
+      "target_description": "save or confirm event button",
+      "status": "pass",
+      "started_at": 1777007797.7641237,
+      "ended_at": 1777007797.9103947,
+      "duration_seconds": 0.1462709903717041,
+      "located_target": {
+        "step_id": "save_event",
+        "target_description": "save or confirm event button",
+        "source": "mock",
+        "bbox": {
+          "x1": 20,
+          "y1": 90,
+          "x2": 110,
+          "y2": 140
+        },
+        "center": [
+          65,
+          115
+        ],
+        "confidence": 0.75,
+        "reason": "Mock matched target: save or confirm event button",
+        "metadata": {}
+      },
+      "action_result": {
+        "success": true,
+        "message": "[DRY_RUN] click target=save or confirm event button",
+        "action": "click",
+        "executed_at": 1777007797.7761214,
+        "dry_run": true,
+        "error_message": null
+      },
+      "verification": {
+        "success": true,
+        "confidence": 0.85,
+        "reason": "Mock verification passed for step save_event: event is saved",
+        "matched_criteria": [
+          "event is saved"
+        ],
+        "failed_criteria": [],
+        "failure_category": "none",
+        "raw_model_output": {
+          "provider": "mock"
+        }
+      },
+      "before_screenshot": "runs\\reports\\run_20260424_131636_2e8be1e3\\screenshots\\004_save_event_before_a1.png",
+      "after_screenshot": "runs\\reports\\run_20260424_131636_2e8be1e3\\screenshots\\004_save_event_after_a1.png",
+      "error_message": null
+    },
+    {
+      "step_id": "verify_event",
+      "step_index": 5,
+      "attempt": 1,
+      "action": "verify",
+      "target_description": "calendar event",
+      "status": "pass",
+      "started_at": 1777007798.0346186,
+      "ended_at": 1777007798.1718714,
+      "duration_seconds": 0.1372528076171875,
+      "located_target": {
+        "step_id": "verify_event",
+        "target_description": null,
+        "source": "none",
+        "bbox": null,
+        "center": null,
+        "confidence": 1.0,
+        "reason": "Action does not require pointer location.",
+        "metadata": {}
+      },
+      "action_result": {
+        "success": true,
+        "message": "[DRY_RUN] verify target=calendar event",
+        "action": "verify",
+        "executed_at": 1777007798.0516188,
+        "dry_run": true,
+        "error_message": null
+      },
+      "verification": {
+        "success": true,
+        "confidence": 0.85,
+        "reason": "Mock verification passed for step verify_event: calendar event appears",
+        "matched_criteria": [
+          "calendar event appears"
+        ],
+        "failed_criteria": [],
+        "failure_category": "none",
+        "raw_model_output": {
+          "provider": "mock"
+        }
+      },
+      "before_screenshot": "runs\\reports\\run_20260424_131636_2e8be1e3\\screenshots\\005_verify_event_before_a1.png",
+      "after_screenshot": "runs\\reports\\run_20260424_131636_2e8be1e3\\screenshots\\005_verify_event_after_a1.png",
+      "error_message": null
+    }
+  ],
+  "artifacts_dir": "runs\\reports\\run_20260424_131636_2e8be1e3",
+  "summary": "Run pass: 5/5 steps passed. Product=calendar. Evidence complete=True.",
+  "failure_category": "none",
+  "error_message": null,
+  "final_verification": {
+    "success": true,
+    "confidence": 0.85,
+    "reason": "Mock final verification passed. The full plan executed and produced step evidence.",
+    "matched_criteria": [
+      "Calendar shows a meeting tomorrow at 2 PM with 张三 as attendee."
+    ],
+    "failed_criteria": [],
+    "failure_category": "none",
+    "raw_model_output": {
+      "provider": "mock"
+    }
+  }
+}

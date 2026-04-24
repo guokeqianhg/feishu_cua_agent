@@ -14,6 +14,8 @@ from core.schemas import (
     RunStatus,
     StepRunRecord,
     StepVerification,
+    RuntimeContext,
+    ScreenshotDiagnosticReport,
     TestCase,
     TestPlan,
     TestRunReport,
@@ -33,10 +35,16 @@ class AgentState(BaseModel):
 
     status: RunStatus = "running"
     dry_run: bool | None = None
+    step_by_step: bool = False
+    skip_current_step: bool = False
+    runtime: RuntimeContext | None = None
+    screenshot_diagnostics: ScreenshotDiagnosticReport | None = None
+    warnings: list[str] = Field(default_factory=list)
     started_at: float = Field(default_factory=time.time)
     ended_at: float | None = None
     artifacts_dir: str = ""
     error: str | None = None
+    aborted_step_id: str | None = None
     failure_category: FailureCategory = "none"
 
     initial_observation: Observation | None = None

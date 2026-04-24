@@ -21,7 +21,15 @@ def verify_step_node(state: AgentState) -> AgentState:
         return state
 
     started_at = state.current_step_started_at or time.time()
-    if state.last_action_result and not state.last_action_result.success:
+    if state.status == "aborted":
+        verification = None
+        status = "aborted"
+        error = state.error or f"Aborted at step {step.id}"
+    elif state.skip_current_step or (state.last_action_result and state.last_action_result.skipped):
+        verification = None
+        status = "skipped"
+        error = state.last_action_result.message if state.last_action_result else "Step skipped."
+    elif state.last_action_result and not state.last_action_result.success:
         verification = None
         status = "fail"
         error = state.last_action_result.error_message or state.last_action_result.message
@@ -48,19 +56,24 @@ def verify_step_node(state: AgentState) -> AgentState:
         before_screenshot=state.before_observation.screenshot_path if state.before_observation else None,
         after_screenshot=state.after_observation.screenshot_path if state.after_observation else None,
         error_message=error,
+        user_confirmed=state.last_action_result.user_confirmed if state.last_action_result else None,
+        user_decision=state.last_action_result.user_decision if state.last_action_result else None,
     )
     state.step_records.append(record)
-    if status == "pass":
+    if status in ("pass", "skipped"):
         state.current_step_idx += 1
         state.current_attempt = 1
         state.last_located_target = None
         state.last_action_result = None
         state.last_verification = None
+        state.skip_current_step = False
     logger.log(state, "verify", "Step verified", step_id=step.id, status=status, attempt=state.current_attempt)
     return state
 
 
 def final_verify_node(state: AgentState) -> AgentState:
+    if state.status == "aborted":
+        return state
     if state.plan is None:
         state.status = "fail"
         state.failure_category = "planning_failed"

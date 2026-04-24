@@ -16,10 +16,13 @@ from app.schemas import (
     RunRequest,
     RunResponse,
     RunStatusResponse,
+    ScreenshotDiagnosticsResponse,
 )
+from core.runtime import runtime_context
 from core.schemas import TestCase
 from storage.artifact_store import ArtifactStore
 from storage.case_loader import load_case
+from tools.capture.diagnostics import check_configured_monitor, run_screenshot_diagnostics
 from tools.capture.mss_backend import MSSCaptureBackend
 from tools.vision.ocr import OCRClient
 from tools.vision.vlm_client import build_vlm_client
@@ -33,7 +36,28 @@ artifact_store = ArtifactStore()
 def _invoke(case: TestCase, dry_run: bool | None = None) -> AgentState:
     run_id = uuid4().hex
     run_dir = artifact_store.create_run_dir(run_id)
-    state = AgentState(run_id=run_id, test_case=case, artifacts_dir=str(run_dir), dry_run=dry_run)
+    context = runtime_context(dry_run)
+    diagnostics = None
+    if not context.dry_run:
+        diagnostics = check_configured_monitor()
+        if (not diagnostics.healthy) and (not settings.allow_unhealthy_screenshot):
+            causes = "; ".join(diagnostics.possible_causes)
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Screenshot health check failed before real desktop execution. "
+                    f"Diagnostics: {diagnostics.artifacts_dir}. Warnings: {diagnostics.warnings}. "
+                    f"Possible causes: {causes}. Set CUA_LARK_ALLOW_UNHEALTHY_SCREENSHOT=true to force continue."
+                ),
+            )
+    state = AgentState(
+        run_id=run_id,
+        test_case=case,
+        artifacts_dir=str(run_dir),
+        dry_run=context.dry_run,
+        runtime=context,
+        screenshot_diagnostics=diagnostics,
+    )
     result = graph.invoke(state, config={"recursion_limit": max(settings.max_total_steps * 8, 100)})
     final_state = result if isinstance(result, AgentState) else AgentState.model_validate(dict(result))
     return final_state
@@ -56,7 +80,19 @@ def _response(state: AgentState) -> RunResponse:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "app": settings.app_name, "dry_run": settings.dry_run}
+    context = runtime_context()
+    return {
+        "status": "ok",
+        "app": settings.app_name,
+        "dry_run": settings.dry_run,
+        "model_provider": settings.model_provider,
+        "effective_model_provider": context.effective_model_provider,
+        "placeholder_screenshot": settings.allow_placeholder_screenshot,
+        "real_desktop_execution": context.real_desktop_execution,
+        "mock_verification": context.mock_verification,
+        "step_by_step": context.step_by_step,
+        "abort_file": context.abort_file,
+    }
 
 
 @app.post("/runs", response_model=RunResponse)
@@ -110,7 +146,13 @@ def observe() -> ObserveResponse:
         page_summary=observation.page_summary,
         elements=len(observation.elements),
         ocr_lines=observation.ocr_lines,
+        warnings=observation.risk,
     )
+
+
+@app.get("/diagnostics/screenshot", response_model=ScreenshotDiagnosticsResponse)
+def screenshot_diagnostics() -> ScreenshotDiagnosticsResponse:
+    return ScreenshotDiagnosticsResponse(report=run_screenshot_diagnostics(include_all_monitors=True))
 
 
 @app.get("/runs/{run_id}", response_model=RunStatusResponse)

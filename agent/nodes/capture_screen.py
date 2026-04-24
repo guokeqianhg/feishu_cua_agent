@@ -3,6 +3,7 @@ from __future__ import annotations
 from agent.state import AgentState
 from storage.artifact_store import ArtifactStore
 from storage.run_logger import RunLogger
+from tools.capture.diagnostics import analyze_image
 from tools.capture.mss_backend import MSSCaptureBackend
 from tools.desktop.window_manager import WindowManager
 
@@ -17,6 +18,11 @@ def _capture(state: AgentState, name: str) -> str:
     path = ArtifactStore.screenshot_path(state.artifacts_dir, name)
     image = capture_backend.capture()
     image.save(path)
+    analysis = analyze_image(str(path), monitor_index=-1)
+    if analysis.is_suspicious:
+        warning = f"Screenshot warning: {analysis.warning} path={path}"
+        if warning not in state.warnings:
+            state.warnings.append(warning)
     logger.log(state, "capture_screen", "Screenshot captured", path=str(path))
     return str(path)
 

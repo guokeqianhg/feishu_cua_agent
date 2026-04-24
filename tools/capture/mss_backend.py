@@ -8,8 +8,8 @@ from tools.capture.base import ScreenCaptureBackend
 
 
 class MSSCaptureBackend(ScreenCaptureBackend):
-    def __init__(self, monitor_index: int = 1):
-        self.monitor_index = monitor_index
+    def __init__(self, monitor_index: int | None = None):
+        self.monitor_index = settings.monitor_index if monitor_index is None else monitor_index
 
     def capture(self) -> Image.Image:
         try:

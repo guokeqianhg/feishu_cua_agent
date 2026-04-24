@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from core.schemas import Product, RunStatus, TestPlan, TestRunReport
+from core.schemas import Product, RunStatus, ScreenshotDiagnosticReport, TestPlan, TestRunReport
 
 
 class RunRequest(BaseModel):
@@ -56,3 +56,8 @@ class ObserveResponse(BaseModel):
     page_summary: str | None = None
     elements: int
     ocr_lines: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ScreenshotDiagnosticsResponse(BaseModel):
+    report: ScreenshotDiagnosticReport

@@ -89,7 +89,15 @@ class MockVLMClient(BaseVLMClient):
         product = case.product if case.product != "unknown" else _product_from_text(case.instruction)
         text = case.instruction
 
-        if product == "im":
+        if case.metadata.get("safe_smoke") or "no-send" in case.tags or "smoke_search" in case.id:
+            steps = [
+                PlanStep(id="open_im", action="click", target_description="left navigation message or IM entry", expected_state="IM page is open", retry_limit=2),
+                PlanStep(id="focus_search", action="click", target_description="global or message search box", expected_state="search box is focused", retry_limit=2),
+                PlanStep(id="type_safe_query", action="type_text", target_description="search box", input_text="harmless-smoke-test", expected_state="search text is entered"),
+                PlanStep(id="observe_results", action="wait", wait_seconds=1.0, expected_state="search results or empty state are visible"),
+                PlanStep(id="verify_no_send", action="verify", target_description="current screen", expected_state="No chat message was sent"),
+            ]
+        elif product == "im":
             message = _quoted_value(text, "Hello World")
             steps = [
                 PlanStep(id="open_im", action="click", target_description="left navigation message or IM entry", expected_state="IM page is open", retry_limit=2),

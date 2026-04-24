@@ -14,7 +14,7 @@ from agent.state import AgentState
 
 
 def route_after_plan(state: AgentState) -> str:
-    if state.status in ("fail", "error"):
+    if state.status in ("fail", "error", "aborted"):
         return "report"
     return "capture_before"
 
@@ -22,10 +22,14 @@ def route_after_plan(state: AgentState) -> str:
 def route_after_locate(state: AgentState) -> str:
     if state.status in ("fail", "error"):
         return "recover_or_report"
+    if state.status == "aborted":
+        return "report"
     return "execute"
 
 
 def route_after_execute(state: AgentState) -> str:
+    if state.status == "aborted":
+        return "capture_after"
     if state.status in ("fail", "error"):
         return "capture_after"
     return "capture_after"
@@ -33,10 +37,13 @@ def route_after_execute(state: AgentState) -> str:
 
 def route_after_verify(state: AgentState) -> str:
     last_record = state.step_records[-1] if state.step_records else None
-    if last_record and last_record.status == "pass":
+    if last_record and last_record.status in ("pass", "skipped"):
         if state.plan and state.current_step_idx >= len(state.plan.steps):
             return "final_verify"
         return "capture_before"
+
+    if last_record and last_record.status == "aborted":
+        return "report"
 
     step = state.current_step()
     if step is None:
@@ -61,7 +68,7 @@ def route_after_recover_or_report(state: AgentState) -> str:
 
 
 def route_after_recover(state: AgentState) -> str:
-    if state.status in ("fail", "error"):
+    if state.status in ("fail", "error", "aborted"):
         return "report"
     return "capture_before"
 

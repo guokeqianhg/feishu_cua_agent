@@ -18,22 +18,39 @@ class ActionExecutor:
 
     def execute(self, step: PlanStep, target: LocatedTarget | None = None) -> ActionResult:
         try:
-            message = self._execute(step, target)
-            return ActionResult(success=True, message=message, action=step.action, dry_run=self.dry_run)
+            center = self._center(step, target)
+            message = self._execute(step, target, center)
+            return ActionResult(
+                success=True,
+                message=message,
+                action=step.action,
+                dry_run=self.dry_run,
+                coordinates=center,
+                drag_to=step.drag_to,
+                input_text=step.input_text,
+                hotkeys=step.hotkeys,
+                scroll_amount=step.scroll_amount,
+                wait_seconds=step.wait_seconds,
+            )
         except Exception as exc:
             return ActionResult(
                 success=False,
                 message="action execution failed",
                 action=step.action,
                 dry_run=self.dry_run,
+                coordinates=self._center(step, target),
+                drag_to=step.drag_to,
+                input_text=step.input_text,
+                hotkeys=step.hotkeys,
+                scroll_amount=step.scroll_amount,
+                wait_seconds=step.wait_seconds,
                 error_message=str(exc),
             )
 
-    def _execute(self, step: PlanStep, target: LocatedTarget | None = None) -> str:
+    def _execute(self, step: PlanStep, target: LocatedTarget | None, center: tuple[int, int] | None) -> str:
         if self.dry_run:
-            return f"[DRY_RUN] {step.action} target={step.target_description or ''}"
+            return f"[DRY_RUN] {step.action} target={step.target_description or ''} center={center}"
 
-        center = self._center(step, target)
         if step.action == "click":
             self._require_center(center, step)
             pyautogui.moveTo(center[0], center[1], duration=0.15)

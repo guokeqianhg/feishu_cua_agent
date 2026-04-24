@@ -3,10 +3,10 @@ from __future__ import annotations
 import time
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-RunStatus = Literal["queued", "running", "pass", "fail", "error", "human_review"]
+RunStatus = Literal["queued", "running", "pass", "fail", "error", "human_review", "aborted"]
 Product = Literal["im", "docs", "calendar", "base", "vc", "mail", "unknown"]
 ActionType = Literal[
     "click",
@@ -123,6 +123,15 @@ class ActionResult(BaseModel):
     action: ActionType
     executed_at: float = Field(default_factory=time.time)
     dry_run: bool = False
+    coordinates: tuple[int, int] | None = None
+    drag_to: tuple[int, int] | None = None
+    input_text: str | None = None
+    hotkeys: list[str] = Field(default_factory=list)
+    scroll_amount: int | None = None
+    wait_seconds: float | None = None
+    user_confirmed: bool | None = None
+    user_decision: Literal["yes", "skip", "abort", "auto"] = "auto"
+    skipped: bool = False
     error_message: str | None = None
 
 
@@ -142,7 +151,7 @@ class StepRunRecord(BaseModel):
     attempt: int
     action: ActionType
     target_description: str | None = None
-    status: Literal["pass", "fail", "skipped", "error"]
+    status: Literal["pass", "fail", "skipped", "error", "aborted"]
     started_at: float
     ended_at: float
     duration_seconds: float
@@ -152,6 +161,8 @@ class StepRunRecord(BaseModel):
     before_screenshot: str | None = None
     after_screenshot: str | None = None
     error_message: str | None = None
+    user_confirmed: bool | None = None
+    user_decision: str | None = None
 
 
 class RunMetrics(BaseModel):
@@ -164,6 +175,55 @@ class RunMetrics(BaseModel):
     success_rate: float = 0.0
     product_coverage: list[Product] = Field(default_factory=list)
     evidence_complete: bool = False
+
+
+class RuntimeContext(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_provider: str
+    effective_model_provider: str
+    dry_run: bool
+    placeholder_screenshot: bool
+    real_desktop_execution: bool
+    mock_verification: bool
+    step_by_step: bool = False
+    abort_file: str | None = None
+    allow_unhealthy_screenshot: bool = False
+    monitor_index: int | None = None
+
+
+class ScreenshotAnalysis(BaseModel):
+    path: str
+    monitor_index: int
+    width: int
+    height: int
+    mean_luma: float
+    stdev_luma: float
+    min_luma: int
+    max_luma: int
+    is_suspicious: bool
+    is_black: bool
+    is_near_solid: bool
+    warning: str | None = None
+
+
+class MonitorInfo(BaseModel):
+    index: int
+    left: int
+    top: int
+    width: int
+    height: int
+
+
+class ScreenshotDiagnosticReport(BaseModel):
+    diagnostic_id: str
+    created_at: float = Field(default_factory=time.time)
+    artifacts_dir: str
+    monitors: list[MonitorInfo] = Field(default_factory=list)
+    analyses: list[ScreenshotAnalysis] = Field(default_factory=list)
+    healthy: bool = False
+    warnings: list[str] = Field(default_factory=list)
+    possible_causes: list[str] = Field(default_factory=list)
 
 
 class TestRunReport(BaseModel):
@@ -183,4 +243,6 @@ class TestRunReport(BaseModel):
     failure_category: FailureCategory = "none"
     error_message: str | None = None
     final_verification: StepVerification | None = None
-
+    runtime: RuntimeContext | None = None
+    warnings: list[str] = Field(default_factory=list)
+    screenshot_diagnostics: ScreenshotDiagnosticReport | None = None

@@ -5,6 +5,9 @@ from core.schemas import (
     Observation,
     PlanStep,
     RunMetrics,
+    RuntimeContext,
+    ScreenshotAnalysis,
+    ScreenshotDiagnosticReport,
     StepRunRecord,
     StepVerification,
     TestCase,
@@ -20,6 +23,9 @@ __all__ = [
     "Observation",
     "PlanStep",
     "RunMetrics",
+    "RuntimeContext",
+    "ScreenshotAnalysis",
+    "ScreenshotDiagnosticReport",
     "StepRunRecord",
     "StepVerification",
     "TestCase",
@@ -27,4 +33,3 @@ __all__ = [
     "TestRunReport",
     "UIElement",
 ]
-

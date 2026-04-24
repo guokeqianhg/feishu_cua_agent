@@ -1,0 +1,15 @@
+id: smoke_search_only_001
+name: Safe smoke test for Feishu search box
+product: im
+instruction: "安全烟测：打开或聚焦飞书 IM，定位搜索框，输入 harmless-smoke-test，不发送任何聊天消息"
+preconditions:
+  - Feishu desktop client is opened and logged in.
+  - Use a test environment or harmless account state.
+expected_result: "The search box is focused or contains harmless-smoke-test. No chat message is sent."
+tags:
+  - smoke
+  - safe
+  - no-send
+timeout_seconds: 120
+metadata:
+  safe_smoke: true

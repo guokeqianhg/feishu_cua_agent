@@ -18,7 +18,7 @@ from app.schemas import (
     RunStatusResponse,
     ScreenshotDiagnosticsResponse,
 )
-from core.runtime import runtime_context
+from core.runtime import mock_real_execution_block_reason, runtime_context
 from core.schemas import TestCase
 from storage.artifact_store import ArtifactStore
 from storage.case_loader import load_case
@@ -37,6 +37,9 @@ def _invoke(case: TestCase, dry_run: bool | None = None) -> AgentState:
     run_id = uuid4().hex
     run_dir = artifact_store.create_run_dir(run_id)
     context = runtime_context(dry_run)
+    block_reason = mock_real_execution_block_reason(context)
+    if block_reason:
+        raise HTTPException(status_code=409, detail=block_reason)
     diagnostics = None
     if not context.dry_run:
         diagnostics = check_configured_monitor()
@@ -91,7 +94,9 @@ def health() -> dict:
         "real_desktop_execution": context.real_desktop_execution,
         "mock_verification": context.mock_verification,
         "step_by_step": context.step_by_step,
+        "auto_debug": context.auto_debug,
         "abort_file": context.abort_file,
+        "allow_mock_real_execution": context.allow_mock_real_execution,
     }
 
 

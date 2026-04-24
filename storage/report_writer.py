@@ -51,8 +51,10 @@ class ReportWriter:
                     f"- Real Desktop Execution: {report.runtime.real_desktop_execution}",
                     f"- Mock Verification: {report.runtime.mock_verification}",
                     f"- Step By Step: {report.runtime.step_by_step}",
+                    f"- Auto Debug: {report.runtime.auto_debug}",
                     f"- Abort File: {report.runtime.abort_file}",
                     f"- Allow Unhealthy Screenshot: {report.runtime.allow_unhealthy_screenshot}",
+                    f"- Allow Mock Real Execution: {report.runtime.allow_mock_real_execution}",
                     f"- Monitor Index: {report.runtime.monitor_index}",
                 ]
             )
@@ -99,8 +101,8 @@ class ReportWriter:
             f"- Evidence Complete: {report.metrics.evidence_complete}",
             "",
             "## Step Details",
-            "| Step | Action | Target | Coords | Input/Keys | Confirm | Dry Run | Status | Duration | Screenshot | Reason |",
-            "|---|---|---|---|---|---|---|---|---:|---|---|",
+            "| Step | Action | Target | Coords | Input/Keys | Confirm | Manual | Dry Run | Window | Locator | Locate Warnings | Recommended | Status | Duration | Screenshot | Reason |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|---:|---|---|",
             ]
         )
         for record in report.step_records:
@@ -111,6 +113,20 @@ class ReportWriter:
             elif record.error_message:
                 reason = record.error_message
             coords = record.action_result.coordinates if record.action_result else None
+            manual = record.action_result.manual_override if record.action_result else False
+            dry_run = record.action_result.dry_run if record.action_result else ""
+            locator = ""
+            locate_warnings = ""
+            recommended = ""
+            if record.located_target:
+                locator = (
+                    f"{record.located_target.source}/"
+                    f"{record.located_target.confidence:.2f}/"
+                    f"{record.located_target.bbox_area_ratio}"
+                )
+                locate_warnings = "; ".join(record.located_target.warnings)
+                recommended = record.located_target.recommended_action
+            window_title = record.after_window_title or record.before_window_title or ""
             input_or_keys = ""
             if record.action_result:
                 if record.action_result.input_text:
@@ -122,7 +138,7 @@ class ReportWriter:
             lines.append(
                 f"| {record.step_id} | {record.action} | {record.target_description or ''} | "
                 f"{coords or ''} | {input_or_keys} | {record.user_decision or ''} | "
-                f"{record.action_result.dry_run if record.action_result else ''} | "
+                f"{manual} | {dry_run} | {window_title} | {locator} | {locate_warnings} | {recommended} | "
                 f"{record.status} | {record.duration_seconds:.2f} | "
                 f"{screenshot} | {reason} |"
             )

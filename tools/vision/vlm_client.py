@@ -62,6 +62,36 @@ def _bbox(payload: Any) -> BoundingBox | None:
         return None
 
 
+def _normalize_verification_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    allowed_categories = {
+        "none",
+        "perception_failed",
+        "planning_failed",
+        "location_failed",
+        "action_failed",
+        "verification_failed",
+        "timeout",
+        "permission_denied",
+        "product_state_invalid",
+        "unknown_error",
+    }
+    if payload.get("failure_category") is None:
+        payload["failure_category"] = "none"
+    elif payload.get("failure_category") not in allowed_categories:
+        payload["failure_category"] = "verification_failed"
+    for key in ("matched_criteria", "failed_criteria"):
+        value = payload.get(key)
+        if value is None:
+            payload[key] = []
+        elif not isinstance(value, list):
+            payload[key] = [str(value)]
+    if payload.get("reason") is None:
+        payload["reason"] = ""
+    if payload.get("confidence") is None:
+        payload["confidence"] = 0.0
+    return payload
+
+
 class BaseVLMClient(ABC):
     @abstractmethod
     def create_plan(self, case: TestCase, observation: Observation | None = None) -> TestPlan:
@@ -85,14 +115,18 @@ class BaseVLMClient(ABC):
 
 
 class MockVLMClient(BaseVLMClient):
+    @staticmethod
+    def _is_safe_smoke(case: TestCase) -> bool:
+        return bool(case.metadata.get("safe_smoke") or "no-send" in case.tags or "smoke_search" in case.id)
+
     def create_plan(self, case: TestCase, observation: Observation | None = None) -> TestPlan:
         product = case.product if case.product != "unknown" else _product_from_text(case.instruction)
         text = case.instruction
 
-        if case.metadata.get("safe_smoke") or "no-send" in case.tags or "smoke_search" in case.id:
+        if self._is_safe_smoke(case):
             steps = [
-                PlanStep(id="open_im", action="click", target_description="left navigation message or IM entry", expected_state="IM page is open", retry_limit=2),
-                PlanStep(id="focus_search", action="click", target_description="global or message search box", expected_state="search box is focused", retry_limit=2),
+                PlanStep(id="open_im", action="verify", target_description="current Feishu IM or messages page", expected_state="If IM is already open, continue; otherwise use step-by-step to skip and open Feishu manually.", retry_limit=1),
+                PlanStep(id="focus_search", action="click", target_description="left sidebar search box", expected_state="Feishu sidebar search box is focused", retry_limit=1),
                 PlanStep(id="type_safe_query", action="type_text", target_description="search box", input_text="harmless-smoke-test", expected_state="search text is entered"),
                 PlanStep(id="observe_results", action="wait", wait_seconds=1.0, expected_state="search results or empty state are visible"),
                 PlanStep(id="verify_no_send", action="verify", target_description="current screen", expected_state="No chat message was sent"),
@@ -228,6 +262,9 @@ class OpenAICompatibleVLMClient(MockVLMClient):
         return (resp.choices[0].message.content or "").strip()
 
     def create_plan(self, case: TestCase, observation: Observation | None = None) -> TestPlan:
+        if self._is_safe_smoke(case):
+            return super().create_plan(case, observation)
+
         prompt = f"""
 Convert this Feishu/Lark desktop GUI test case into executable JSON.
 Return exactly these fields: goal, product, steps, success_criteria, assumptions.
@@ -280,8 +317,21 @@ OCR lines:
                 risk=[str(x) for x in payload.get("risk", [])] if isinstance(payload.get("risk", []), list) else [],
                 raw_model_output=payload,
             )
-        except Exception:
-            return super().describe_screen(screenshot_path, ocr_lines)
+        except Exception as exc:
+            if not settings.dry_run:
+                return Observation(
+                    screenshot_path=screenshot_path,
+                    page_type="unknown",
+                    page_summary="Real VLM describe_screen failed.",
+                    elements=[],
+                    ocr_lines=ocr_lines or [],
+                    risk=[f"Real VLM describe_screen failed; mock observation is disabled during real execution: {exc}"],
+                    raw_model_output={"provider": "vlm_error", "error": str(exc)},
+                )
+            observation = super().describe_screen(screenshot_path, ocr_lines)
+            observation.risk.append(f"Real VLM describe_screen failed and fell back to mock observation: {exc}")
+            observation.raw_model_output = {"provider": "mock", "fallback_error": str(exc)}
+            return observation
 
     def locate_element(self, observation: Observation, step: PlanStep) -> LocatedTarget:
         if step.action in ("wait", "hotkey", "type_text", "verify", "finish"):
@@ -314,8 +364,11 @@ Step:
                 reason=str(payload.get("reason", "")),
                 metadata=payload,
             )
-        except Exception:
-            return super().locate_element(observation, step)
+        except Exception as exc:
+            located = super().locate_element(observation, step)
+            located.warnings.append(f"Real VLM locate_element failed and fell back to mock locator: {exc}")
+            located.metadata["fallback_error"] = str(exc)
+            return located
 
     def verify_step(self, step: PlanStep, before: Observation | None, after: Observation | None) -> StepVerification:
         if after is None:
@@ -334,9 +387,18 @@ After:
 {after.model_dump_json()}
 """.strip()
         try:
-            payload = _json_payload(self._chat_vision(prompt, after.screenshot_path))
+            payload = _normalize_verification_payload(_json_payload(self._chat_vision(prompt, after.screenshot_path)))
             return StepVerification.model_validate(payload)
-        except Exception:
+        except Exception as exc:
+            if not settings.dry_run:
+                return StepVerification(
+                    success=False,
+                    confidence=0.0,
+                    reason=f"Real VLM verification failed; mock fallback is disabled during real desktop execution: {exc}",
+                    failed_criteria=[step.expected_state or step.id],
+                    failure_category="verification_failed",
+                    raw_model_output={"provider": "vlm_error", "error": str(exc)},
+                )
             return super().verify_step(step, before, after)
 
     def verify_case(self, case: TestCase, plan: TestPlan, final_observation: Observation | None) -> StepVerification:
@@ -356,9 +418,18 @@ Final observation:
 {final_observation.model_dump_json()}
 """.strip()
         try:
-            payload = _json_payload(self._chat_vision(prompt, final_observation.screenshot_path))
+            payload = _normalize_verification_payload(_json_payload(self._chat_vision(prompt, final_observation.screenshot_path)))
             return StepVerification.model_validate(payload)
-        except Exception:
+        except Exception as exc:
+            if not settings.dry_run:
+                return StepVerification(
+                    success=False,
+                    confidence=0.0,
+                    reason=f"Real VLM final verification failed; mock fallback is disabled during real desktop execution: {exc}",
+                    failed_criteria=plan.success_criteria,
+                    failure_category="verification_failed",
+                    raw_model_output={"provider": "vlm_error", "error": str(exc)},
+                )
             return super().verify_case(case, plan, final_observation)
 
 

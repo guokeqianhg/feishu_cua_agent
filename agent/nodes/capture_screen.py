@@ -14,16 +14,39 @@ window = WindowManager()
 
 
 def _capture(state: AgentState, name: str) -> str:
-    window.focus_lark()
+    focused = window.focus_lark()
+    active_title = window.get_active_window_title()
+    if not focused:
+        warning = f"Window focus warning: could not confirm Feishu/Lark is foreground. active_window={active_title!r}"
+        if warning not in state.warnings:
+            state.warnings.append(warning)
     path = ArtifactStore.screenshot_path(state.artifacts_dir, name)
     image = capture_backend.capture()
     image.save(path)
     analysis = analyze_image(str(path), monitor_index=-1)
+    if capture_backend.last_warning:
+        warning = f"Screenshot warning: {capture_backend.last_warning} path={path}"
+        if warning not in state.warnings:
+            state.warnings.append(warning)
+    if capture_backend.last_backend == "placeholder":
+        warning = f"Screenshot warning: placeholder screenshot was used path={path}"
+        if warning not in state.warnings:
+            state.warnings.append(warning)
     if analysis.is_suspicious:
         warning = f"Screenshot warning: {analysis.warning} path={path}"
         if warning not in state.warnings:
             state.warnings.append(warning)
-    logger.log(state, "capture_screen", "Screenshot captured", path=str(path))
+    logger.log(
+        state,
+        "capture_screen",
+        "Screenshot captured",
+        path=str(path),
+        capture_backend=capture_backend.last_backend,
+        monitor_index=capture_backend.last_monitor_index,
+        warning=capture_backend.last_warning,
+        focused_lark=focused,
+        active_window_title=active_title,
+    )
     return str(path)
 
 

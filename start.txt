@@ -20,3 +20,14 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/run" `
   -Method Post `
   -ContentType "application/json" `
   -Body '{"task":"打开飞书消息页面"}'
+
+
+$env:CUA_LARK_MODEL_PROVIDER="auto"
+$env:OPENAI_API_KEY="sk-37e7c3a7a45a4aefa0b8b60ca4821dd2"
+$env:OPENAI_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+$env:OPENAI_MODEL_TEXT="qwen-plus"
+$env:OPENAI_MODEL_VISION="qwen-vl-max"
+
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+$env:CUA_LARK_MONITOR_INDEX="1"

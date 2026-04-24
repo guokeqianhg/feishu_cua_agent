@@ -1,6 +1,39 @@
 import os
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
+
+
+def _strip_quotes(value: str) -> str:
+    raw = value.strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ("'", '"'):
+        return raw[1:-1]
+    return raw
+
+
+def _load_env_file(path: Path) -> None:
+    if not path.exists() or not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        raw = line.strip().lstrip("\ufeff")
+        if not raw or raw.startswith("#") or "=" not in raw:
+            continue
+        key, value = raw.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        # Shell environment variables have priority over file defaults.
+        os.environ.setdefault(key, _strip_quotes(value))
+
+
+def _load_default_env() -> None:
+    backend_root = Path(__file__).resolve().parents[1]
+    configured = os.getenv("CUA_LARK_ENV_FILE")
+    env_path = Path(configured) if configured else backend_root / ".env"
+    _load_env_file(env_path)
+
+
+_load_default_env()
 
 
 class Settings(BaseModel):
@@ -23,10 +56,13 @@ class Settings(BaseModel):
     wait_after_action_seconds: float = float(os.getenv("CUA_LARK_WAIT_AFTER_ACTION_SECONDS", "0.8"))
     dry_run: bool = os.getenv("DRY_RUN", "true").lower() == "true"
     step_by_step: bool = os.getenv("CUA_LARK_STEP_BY_STEP", "false").lower() == "true"
+    auto_debug: bool = os.getenv("CUA_LARK_AUTO_DEBUG", "false").lower() == "true"
     abort_file: str = os.getenv("CUA_LARK_ABORT_FILE", "./runs/ABORT")
     use_mock_when_no_key: bool = os.getenv("CUA_LARK_USE_MOCK_WHEN_NO_KEY", "true").lower() == "true"
     allow_placeholder_screenshot: bool = os.getenv("CUA_LARK_PLACEHOLDER_SCREENSHOT", "true").lower() == "true"
     allow_unhealthy_screenshot: bool = os.getenv("CUA_LARK_ALLOW_UNHEALTHY_SCREENSHOT", "false").lower() == "true"
+    allow_mock_real_execution: bool = os.getenv("CUA_LARK_ALLOW_MOCK_REAL_EXECUTION", "false").lower() == "true"
+    auto_select_healthy_monitor: bool = os.getenv("CUA_LARK_AUTO_SELECT_HEALTHY_MONITOR", "true").lower() == "true"
 
 
 settings = Settings()

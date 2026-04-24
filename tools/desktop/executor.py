@@ -80,6 +80,10 @@ class ActionExecutor:
         if step.action == "type_text":
             if step.input_text is None:
                 raise ValueError("type_text action requires input_text")
+            if center is not None:
+                pyautogui.moveTo(center[0], center[1], duration=0.1)
+                pyautogui.click(center[0], center[1])
+                time.sleep(0.15)
             pyperclip.copy(step.input_text)
             pyautogui.hotkey("ctrl", "v")
             return f"type_text length={len(step.input_text)}"

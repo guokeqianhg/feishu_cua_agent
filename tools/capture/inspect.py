@@ -8,6 +8,7 @@ import pyautogui
 from PIL import ImageDraw
 
 from app.config import settings
+from tools.capture.diagnostics import analyze_pil_image
 from tools.capture.mss_backend import MSSCaptureBackend
 
 
@@ -16,7 +17,9 @@ def inspect_screen(grid_size: int = 100) -> dict:
     out_dir = Path(settings.artifact_root) / "diagnostics" / f"inspect_{stamp}_{uuid4().hex[:8]}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    image = MSSCaptureBackend(settings.monitor_index).capture()
+    capture = MSSCaptureBackend(settings.monitor_index)
+    image = capture.capture()
+    raw_analysis = analyze_pil_image(image, "memory", capture.last_monitor_index)
     draw = ImageDraw.Draw(image)
     width, height = image.size
 
@@ -43,5 +46,10 @@ def inspect_screen(grid_size: int = 100) -> dict:
         "grid_size": grid_size,
         "path": str(path),
         "artifacts_dir": str(out_dir),
+        "capture_backend": capture.last_backend,
+        "capture_monitor_index": capture.last_monitor_index,
+        "capture_warning": capture.last_warning,
+        "raw_mean_luma": raw_analysis.mean_luma,
+        "raw_stdev_luma": raw_analysis.stdev_luma,
+        "raw_suspicious": raw_analysis.is_suspicious,
     }
-

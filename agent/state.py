@@ -36,6 +36,7 @@ class AgentState(BaseModel):
     status: RunStatus = "running"
     dry_run: bool | None = None
     step_by_step: bool = False
+    auto_debug: bool = False
     skip_current_step: bool = False
     runtime: RuntimeContext | None = None
     screenshot_diagnostics: ScreenshotDiagnosticReport | None = None

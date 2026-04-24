@@ -8,7 +8,7 @@ from uuid import uuid4
 from agent.graph import build_graph
 from agent.state import AgentState
 from app.config import settings
-from core.runtime import runtime_context
+from core.runtime import mock_real_execution_block_reason, runtime_context
 from core.schemas import TestCase
 from storage.artifact_store import ArtifactStore
 from storage.case_loader import load_case
@@ -17,12 +17,20 @@ from tools.capture.diagnostics import check_configured_monitor, run_screenshot_d
 from tools.capture.inspect import inspect_screen
 
 
-def run_case(case: TestCase, step_by_step: bool | None = None) -> AgentState:
+def run_case(case: TestCase, step_by_step: bool | None = None, auto_debug: bool | None = None) -> AgentState:
     run_id = uuid4().hex
     run_dir = ArtifactStore().create_run_dir(run_id)
     context = runtime_context()
     if step_by_step is not None:
         context.step_by_step = step_by_step
+    if auto_debug is not None:
+        context.auto_debug = auto_debug
+    if context.auto_debug:
+        context.step_by_step = False
+    block_reason = mock_real_execution_block_reason(context)
+    if block_reason:
+        print(block_reason, file=sys.stderr)
+        raise SystemExit(2)
     diagnostics = None
     if not context.dry_run:
         diagnostics = check_configured_monitor()
@@ -42,6 +50,7 @@ def run_case(case: TestCase, step_by_step: bool | None = None) -> AgentState:
         runtime=context,
         screenshot_diagnostics=diagnostics,
         step_by_step=context.step_by_step,
+        auto_debug=context.auto_debug,
     )
     try:
         result = build_graph().invoke(state, config={"recursion_limit": max(settings.max_total_steps * 8, 100)})
@@ -62,11 +71,13 @@ def main() -> None:
     run.add_argument("--instruction", required=True)
     run.add_argument("--product", default="unknown")
     run.add_argument("--expected-result", default="")
-    run.add_argument("--step-by-step", action="store_true", help="Preview every action and wait for y/n/q.")
+    run.add_argument("--step-by-step", action="store_true", help="Preview every action and wait for y/n/q or c x y.")
+    run.add_argument("--auto-debug", action="store_true", help="Preview actions, execute automatically, and stop on unsafe state or failed verification.")
 
     run_case_cmd = sub.add_parser("run-case", help="Run a YAML test case.")
     run_case_cmd.add_argument("path")
-    run_case_cmd.add_argument("--step-by-step", action="store_true", help="Preview every action and wait for y/n/q.")
+    run_case_cmd.add_argument("--step-by-step", action="store_true", help="Preview every action and wait for y/n/q or c x y.")
+    run_case_cmd.add_argument("--auto-debug", action="store_true", help="Preview actions, execute automatically, and stop on unsafe state or failed verification.")
 
     diag = sub.add_parser("screenshot-diagnostics", help="Diagnose MSS screenshot capture.")
     diag.add_argument("--configured-only", action="store_true", help="Only capture CUA_LARK_MONITOR_INDEX.")
@@ -116,7 +127,11 @@ def main() -> None:
     else:
         case = load_case(args.path)
 
-    state = run_case(case, step_by_step=getattr(args, "step_by_step", False) or settings.step_by_step)
+    state = run_case(
+        case,
+        step_by_step=getattr(args, "step_by_step", False) or settings.step_by_step,
+        auto_debug=getattr(args, "auto_debug", False) or settings.auto_debug,
+    )
     print(state.report_summary)
     print(f"report_dir={state.artifacts_dir}")
     print(f"summary_json={state.summary_json_path}")

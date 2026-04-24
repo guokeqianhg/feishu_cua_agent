@@ -38,8 +38,8 @@ def _monitor_info(index: int, monitor: dict) -> MonitorInfo:
     )
 
 
-def analyze_image(path: str, monitor_index: int) -> ScreenshotAnalysis:
-    image = Image.open(path).convert("L")
+def analyze_pil_image(image: Image.Image, path: str, monitor_index: int) -> ScreenshotAnalysis:
+    image = image.convert("L")
     stat = ImageStat.Stat(image)
     mean_luma = float(stat.mean[0])
     stdev_luma = float(stat.stddev[0])
@@ -68,6 +68,10 @@ def analyze_image(path: str, monitor_index: int) -> ScreenshotAnalysis:
         is_near_solid=is_near_solid,
         warning=warning,
     )
+
+
+def analyze_image(path: str, monitor_index: int) -> ScreenshotAnalysis:
+    return analyze_pil_image(Image.open(path), path, monitor_index)
 
 
 def run_screenshot_diagnostics(include_all_monitors: bool = True) -> ScreenshotDiagnosticReport:

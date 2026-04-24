@@ -21,6 +21,55 @@ conda activate agent
 cd D:\找工作\feishu_cua_agent\backend
 ```
 
+## 配置文件
+
+后端启动时会自动读取：
+
+```text
+backend\.env
+```
+
+你可以先复制示例文件：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+然后在 `.env` 中填写模型 API 配置：
+
+```text
+CUA_LARK_MODEL_PROVIDER=auto
+OPENAI_API_KEY=replace_me
+OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+OPENAI_MODEL_TEXT=qwen-plus
+OPENAI_MODEL_VISION=qwen-vl-max
+```
+
+常用运行配置也可以写在同一个文件里：
+
+```text
+DRY_RUN=true
+CUA_LARK_PLACEHOLDER_SCREENSHOT=true
+CUA_LARK_MONITOR_INDEX=1
+CUA_LARK_STEP_BY_STEP=false
+CUA_LARK_AUTO_DEBUG=false
+```
+
+读取规则：
+
+- 默认读取 `backend\.env`。
+- PowerShell 里手动设置的环境变量优先级更高，会覆盖 `.env`。
+- 如果想指定其它配置文件，可以设置 `CUA_LARK_ENV_FILE`。
+
+示例：
+
+```powershell
+$env:CUA_LARK_ENV_FILE="D:\找工作\feishu_cua_agent\backend\.env.real"
+python cli.py run-case cases\smoke_search_only.yaml
+```
+
+建议不要把 `.env` 提交到仓库，只提交 `.env.example`。
+
 ## 截图诊断
 
 真实桌面操作前，建议先确认 MSS 能抓到正常屏幕，而不是黑屏或纯色图：
@@ -178,6 +227,73 @@ http://127.0.0.1:8000/docs
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/health"
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/observe" -Method Post
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/diagnostics/screenshot"
+```
+
+## 真实模型 smoke 调试流程
+
+`.env` 可以放真实模型配置，但不要提交 `.env`，也不要把 API Key 或 Authorization header 写入日志、报告或 README。程序启动时会自动读取 `backend\.env`，PowerShell 中临时设置的环境变量优先级更高。
+
+推荐按下面顺序调试真实桌面链路：
+
+```powershell
+conda activate agent
+cd D:\找工作\feishu_cua_agent\backend
+
+python cli.py screenshot-diagnostics --configured-only
+python cli.py inspect-screen
+
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+python cli.py run-case cases\smoke_search_only.yaml --step-by-step
+```
+
+`smoke_search_only.yaml` 是安全 smoke 用例，只验证飞书窗口、搜索框聚焦、输入 `harmless-smoke-test` 和截图证据；它不会发送消息，不会点击聊天结果进入会话，也不会使用 Enter 发送聊天内容。当前实现会优先使用 `Ctrl+K` 聚焦搜索，并通过剪贴板粘贴文本，降低中文输入法导致的不稳定。
+
+step-by-step 提示中会额外显示：
+
+- `locator_source`：定位来源，例如 `vlm`、`ocr`、`mock`、`manual`。
+- `confidence`：定位置信度。
+- `bbox_area_ratio`：候选框占屏幕面积比例。
+- `warnings`：候选框过大、中心点不在预期区域等风险。
+- `recommended_action`：建议继续、跳过、终止或手动坐标。
+- `active_window_title`：执行前的当前前台窗口标题，用来确认快捷键是否会打到飞书窗口。
+
+交互输入支持：
+
+- `y`：按当前候选继续执行。
+- `n`：跳过当前步骤。
+- `q`：终止运行并生成 `status=aborted` 报告。
+- `c x y`：使用手动坐标执行本步骤，例如 `c 120 300`。报告会记录 `manual_override=true` 和实际执行坐标。
+
+如果不想每一步都手动输入 `y`，推荐使用自动调试模式。它会打印每一步的 action preview，然后自动执行；如果定位 warning、窗口聚焦失败、动作失败或真实 VLM 验证失败，会自动中断并生成失败报告：
+
+```powershell
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+python cli.py run-case cases\smoke_search_only.yaml --auto-debug
+```
+
+`--step-by-step` 只建议在需要人工坐标覆盖 `c x y` 时使用；常规 smoke 调试请优先使用 `--auto-debug`。
+
+`smoke_search_only.yaml` 走本地快速验证路径：不会每一步都调用 VLM，因此不会因为模型 JSON 解析失败而卡住，也会明显更快。它通过截图健康、窗口标题、搜索弹窗区域变化、输入框区域变化等本地证据判断 smoke 是否通过。复杂任务仍会使用真实 VLM。
+
+安全保护：当 `DRY_RUN=false` 但 `effective_model_provider=mock` 时，系统默认禁止真实点击，避免模型配置失败回退到 mock 后还继续操作桌面。只有在你明确知道风险时，才设置：
+
+```powershell
+$env:CUA_LARK_ALLOW_MOCK_REAL_EXECUTION="true"
+```
+
+只有当截图诊断健康、`inspect-screen` 坐标合理、`smoke_search_only.yaml --step-by-step` 的截图/坐标/输入证据都稳定后，才进入 `im_send_message.yaml` 的完整 IM 发消息测试。完整发消息测试请先使用测试群和无害文本，不要在重要聊天窗口里测试。
+
+真实执行时，如果真实 VLM 验证失败并回退到 mock，系统会把该步骤标为失败，而不是继续给出 pass。这样可以避免“动作没成功，但 mock verification 让报告变绿”的误判。
+
+如果截图突然变黑，先看 `screenshot-diagnostics` 的原始 MSS 结果。如果所有 monitor 都是 `mean=0.0, stdev=0.0`，通常说明当前 Windows 桌面会话不可捕获，例如远程桌面被最小化、锁屏、权限/安全软件阻止或 GPU/驱动返回保护帧。普通运行链路会自动尝试其它 monitor 和备用截图方式；如果仍失败，会明确写入 `Screenshot warning`，并在允许 placeholder 的 dry-run 场景下生成占位截图，不再把黑屏当作正常 evidence。
+
+相关开关：
+
+```powershell
+$env:CUA_LARK_AUTO_SELECT_HEALTHY_MONITOR="true"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"  # 真实运行建议关闭
 ```
 
 运行自然语言任务：

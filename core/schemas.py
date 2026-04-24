@@ -114,6 +114,9 @@ class LocatedTarget(BaseModel):
     center: tuple[int, int] | None = None
     confidence: float = 0.0
     reason: str = ""
+    bbox_area_ratio: float | None = None
+    warnings: list[str] = Field(default_factory=list)
+    recommended_action: Literal["continue", "skip", "abort", "manual_coordinate"] = "continue"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -130,8 +133,9 @@ class ActionResult(BaseModel):
     scroll_amount: int | None = None
     wait_seconds: float | None = None
     user_confirmed: bool | None = None
-    user_decision: Literal["yes", "skip", "abort", "auto"] = "auto"
+    user_decision: Literal["yes", "skip", "abort", "auto", "manual_coordinate"] = "auto"
     skipped: bool = False
+    manual_override: bool = False
     error_message: str | None = None
 
 
@@ -160,6 +164,8 @@ class StepRunRecord(BaseModel):
     verification: StepVerification | None = None
     before_screenshot: str | None = None
     after_screenshot: str | None = None
+    before_window_title: str | None = None
+    after_window_title: str | None = None
     error_message: str | None = None
     user_confirmed: bool | None = None
     user_decision: str | None = None
@@ -187,8 +193,10 @@ class RuntimeContext(BaseModel):
     real_desktop_execution: bool
     mock_verification: bool
     step_by_step: bool = False
+    auto_debug: bool = False
     abort_file: str | None = None
     allow_unhealthy_screenshot: bool = False
+    allow_mock_real_execution: bool = False
     monitor_index: int | None = None
 
 

@@ -37,6 +37,8 @@ def route_after_execute(state: AgentState) -> str:
 
 def route_after_verify(state: AgentState) -> str:
     last_record = state.step_records[-1] if state.step_records else None
+    if state.status in ("fail", "error"):
+        return "report"
     if last_record and last_record.status in ("pass", "skipped"):
         if state.plan and state.current_step_idx >= len(state.plan.steps):
             return "final_verify"

@@ -55,6 +55,27 @@ def report_node(state: AgentState) -> AgentState:
         case_name=state.test_case.name,
         product=product,
         instruction=state.test_case.instruction,
+        parsed_intent={
+            key: value
+            for key, value in state.test_case.metadata.items()
+            if key
+            in {
+                "parsed_intent",
+                "intent_confidence",
+                "intent_reason",
+                "intent_warnings",
+                "plan_template",
+                "target",
+                "message",
+                "search_text",
+                "doc_title",
+                "doc_body",
+                "event_title",
+                "event_time",
+                "attendees",
+                "safety_guard_required",
+            }
+        },
         status=state.status,
         started_at=state.started_at,
         ended_at=ended_at,

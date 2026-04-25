@@ -1,13 +1,19 @@
 id: docs_create_doc_001
-name: Create project weekly report document
+name: Guarded Docs create document
 product: docs
-instruction: "在飞书中创建一个名为「项目周报」的新文档，并输入标题「2026年Q2项目进展」"
+instruction: "在飞书云文档中新建一个测试文档，标题为「CUA-Lark 测试文档」，正文为「这是一段安全测试正文，不包含真实业务信息。」"
 preconditions:
   - Feishu desktop client is logged in.
   - The current account can create Docs.
-expected_result: "A new document is created and the title contains 2026年Q2项目进展."
+  - Real execution requires CUA_LARK_ALLOW_DOC_CREATE=true.
+expected_result: "A guarded test document is created and the title/body are visible."
 tags:
   - docs
-  - smoke
+  - guarded
   - e2e
 timeout_seconds: 300
+metadata:
+  plan_template: docs_create_doc_guarded
+  safety_guard_required: true
+  doc_title: "CUA-Lark 测试文档"
+  doc_body: "这是一段安全测试正文，不包含真实业务信息。"

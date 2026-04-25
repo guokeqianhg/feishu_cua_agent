@@ -6,6 +6,7 @@ from agent.nodes.capture_screen import capture_after_node, capture_before_node, 
 from agent.nodes.decide import locate_node
 from agent.nodes.execute import execute_node
 from agent.nodes.perceive import observe_after_node, observe_before_node, observe_initial_node
+from agent.nodes.parse_task import parse_task_node
 from agent.nodes.plan_task import plan_task_node
 from agent.nodes.recover import recover_node
 from agent.nodes.report import report_node
@@ -79,6 +80,7 @@ def build_graph():
     graph = StateGraph(AgentState)
     graph.add_node("capture_initial", capture_initial_node)
     graph.add_node("observe_initial", observe_initial_node)
+    graph.add_node("parse_task", parse_task_node)
     graph.add_node("plan_task", plan_task_node)
     graph.add_node("capture_before", capture_before_node)
     graph.add_node("observe_before", observe_before_node)
@@ -91,7 +93,8 @@ def build_graph():
     graph.add_node("final_verify", final_verify_node)
     graph.add_node("report", report_node)
 
-    graph.set_entry_point("capture_initial")
+    graph.set_entry_point("parse_task")
+    graph.add_edge("parse_task", "capture_initial")
     graph.add_edge("capture_initial", "observe_initial")
     graph.add_edge("observe_initial", "plan_task")
     graph.add_conditional_edges("plan_task", route_after_plan, {"capture_before": "capture_before", "report": "report"})

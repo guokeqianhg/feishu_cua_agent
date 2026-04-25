@@ -14,9 +14,13 @@ ActionType = Literal[
     "right_click",
     "drag",
     "scroll",
+    "hover",
     "type_text",
     "hotkey",
     "wait",
+    "focus_window",
+    "conditional_hotkey",
+    "conditional_click",
     "verify",
     "finish",
 ]
@@ -109,7 +113,7 @@ class TestPlan(BaseModel):
 class LocatedTarget(BaseModel):
     step_id: str
     target_description: str | None = None
-    source: Literal["vlm", "ocr", "accessibility", "dom", "history", "manual", "mock", "none"] = "none"
+    source: Literal["vlm", "ocr", "accessibility", "dom", "history", "manual", "cv", "hybrid", "mock", "none"] = "none"
     bbox: BoundingBox | None = None
     center: tuple[int, int] | None = None
     confidence: float = 0.0
@@ -197,6 +201,11 @@ class RuntimeContext(BaseModel):
     abort_file: str | None = None
     allow_unhealthy_screenshot: bool = False
     allow_mock_real_execution: bool = False
+    allow_send_message: bool = False
+    allowed_im_target: str | None = None
+    allow_doc_create: bool = False
+    allow_calendar_create: bool = False
+    allow_calendar_invite: bool = False
     monitor_index: int | None = None
 
 
@@ -240,6 +249,7 @@ class TestRunReport(BaseModel):
     case_name: str
     product: Product
     instruction: str
+    parsed_intent: dict[str, Any] = Field(default_factory=dict)
     status: RunStatus
     started_at: float
     ended_at: float

@@ -23,10 +23,36 @@ def _is_lark_title(title: str) -> bool:
     return any(keyword.lower() in raw for keyword in ("飞书", "feishu", "lark"))
 
 
+def _foreground_keywords(step: PlanStep) -> list[str]:
+    raw = step.metadata.get("foreground_window_keywords")
+    if isinstance(raw, (list, tuple)):
+        return [str(item) for item in raw if str(item).strip()]
+    if isinstance(raw, str) and raw.strip():
+        return [raw.strip()]
+    return []
+
+
+def _title_matches_keywords(title: str, keywords: list[str]) -> bool:
+    raw = (title or "").lower()
+    return any(keyword.lower() in raw for keyword in keywords)
+
+
 def _needs_focus(step: PlanStep, dry_run: bool | None) -> bool:
     if dry_run:
         return False
-    return step.action in ("click", "double_click", "right_click", "drag", "type_text", "hotkey")
+    if step.metadata.get("preserve_foreground"):
+        return False
+    return step.action in (
+        "click",
+        "conditional_click",
+        "double_click",
+        "right_click",
+        "drag",
+        "hover",
+        "type_text",
+        "hotkey",
+        "conditional_hotkey",
+    )
 
 
 def _preview_text(state: AgentState, mode: str = "manual") -> str:
@@ -107,6 +133,10 @@ def _auto_debug_precheck(state: AgentState, step: PlanStep) -> ActionResult | No
     target = state.last_located_target
     if target is None:
         return None
+    if step.action in {"conditional_click", "conditional_hotkey"} and (
+        target.confidence <= 0 or target.recommended_action == "skip"
+    ):
+        return None
     if target.warnings or target.recommended_action != "continue":
         message = (
             f"Auto-debug blocked step {step.id}: recommended_action={target.recommended_action}, "
@@ -125,11 +155,96 @@ def _auto_debug_precheck(state: AgentState, step: PlanStep) -> ActionResult | No
     return None
 
 
+def _mutation_policy_precheck(state: AgentState, step: PlanStep) -> ActionResult | None:
+    if state.dry_run:
+        return None
+    if step.metadata.get("requires_doc_create_guard"):
+        if settings.allow_doc_create:
+            return None
+        message = (
+            f"Guarded Docs create workflow blocked step {step.id}: "
+            "CUA_LARK_ALLOW_DOC_CREATE is not true."
+        )
+        return ActionResult(
+            success=False,
+            message=message,
+            action=step.action,
+            dry_run=bool(state.dry_run),
+            coordinates=state.last_located_target.center if state.last_located_target else None,
+            input_text=step.input_text,
+            hotkeys=step.hotkeys,
+            error_message=message,
+        )
+    if step.metadata.get("requires_calendar_create_guard") or step.metadata.get("dangerous_calendar_create"):
+        if settings.allow_calendar_create:
+            return None
+        message = (
+            f"Guarded Calendar create workflow blocked step {step.id}: "
+            "CUA_LARK_ALLOW_CALENDAR_CREATE is not true."
+        )
+        return ActionResult(
+            success=False,
+            message=message,
+            action=step.action,
+            dry_run=bool(state.dry_run),
+            coordinates=state.last_located_target.center if state.last_located_target else None,
+            input_text=step.input_text,
+            hotkeys=step.hotkeys,
+            error_message=message,
+        )
+    if not step.metadata.get("requires_send_guard") and not step.metadata.get("dangerous_send"):
+        return None
+    target = str(step.metadata.get("target") or "")
+    allowed_target = settings.allowed_im_target.strip()
+    reasons: list[str] = []
+    if not settings.allow_send_message:
+        reasons.append("CUA_LARK_ALLOW_SEND_MESSAGE is not true")
+    if allowed_target and target and target != allowed_target:
+        reasons.append(f"case target {target!r} does not match CUA_LARK_ALLOWED_IM_TARGET")
+    if not reasons:
+        return None
+    message = (
+        f"Guarded IM send workflow blocked step {step.id}: "
+        + "; ".join(reasons)
+        + ". CUA_LARK_ALLOWED_IM_TARGET is optional; when configured, it limits real sends to that exact target."
+    )
+    return ActionResult(
+        success=False,
+        message=message,
+        action=step.action,
+        dry_run=bool(state.dry_run),
+        coordinates=state.last_located_target.center if state.last_located_target else None,
+        input_text=step.input_text,
+        hotkeys=step.hotkeys,
+        error_message=message,
+    )
+
+
+def _conditional_action_precheck(state: AgentState, step: PlanStep) -> ActionResult | None:
+    if step.action not in {"conditional_click", "conditional_hotkey"}:
+        return None
+    target = state.last_located_target
+    if target is not None and target.confidence > 0 and not target.warnings:
+        return None
+    message = f"Conditional step {step.id} skipped because its visual condition is not present."
+    return ActionResult(
+        success=True,
+        message=message,
+        action=step.action,
+        dry_run=bool(state.dry_run),
+        coordinates=target.center if target else None,
+        input_text=step.input_text,
+        hotkeys=step.hotkeys,
+        skipped=True,
+    )
+
+
 def _focus_before_execute(state: AgentState, step: PlanStep) -> ActionResult | None:
     if not _needs_focus(step, state.dry_run):
         return None
 
-    focused = window.focus_lark()
+    keywords = _foreground_keywords(step)
+    focused = window.focus_window_by_keywords(keywords) if keywords else window.focus_lark()
     active_title = window.get_active_window_title()
     logger.log(
         state,
@@ -137,13 +252,14 @@ def _focus_before_execute(state: AgentState, step: PlanStep) -> ActionResult | N
         "Foreground window checked before action",
         step_id=step.id,
         focused_lark=focused,
+        foreground_window_keywords=keywords,
         active_window_title=active_title,
     )
-    if focused or _is_lark_title(active_title):
+    if focused or (_title_matches_keywords(active_title, keywords) if keywords else _is_lark_title(active_title)):
         return None
 
     message = (
-        "Refocus Feishu/Lark before action failed. "
+        "Refocus target window before action failed. "
         f"Active window is {active_title!r}. Action was blocked to avoid operating the wrong window."
     )
     return ActionResult(
@@ -227,6 +343,26 @@ def execute_node(state: AgentState) -> AgentState:
             logger.log(state, "execute", "Auto-debug precheck blocked action", step_id=step.id, result=precheck_error.model_dump())
             return state
 
+    mutation_policy_error = _mutation_policy_precheck(state, step)
+    if mutation_policy_error is not None:
+        mutation_policy_error.user_confirmed = user_confirmed
+        mutation_policy_error.user_decision = user_decision
+        state.last_action_result = mutation_policy_error
+        state.status = "fail"
+        state.failure_category = "permission_denied"
+        state.error = mutation_policy_error.error_message or mutation_policy_error.message
+        logger.log(state, "execute", "Guarded mutation policy blocked action", step_id=step.id, result=mutation_policy_error.model_dump())
+        return state
+
+    conditional_skip = _conditional_action_precheck(state, step)
+    if conditional_skip is not None:
+        conditional_skip.user_confirmed = user_confirmed
+        conditional_skip.user_decision = user_decision
+        state.skip_current_step = True
+        state.last_action_result = conditional_skip
+        logger.log(state, "execute", "Conditional action skipped", step_id=step.id, result=conditional_skip.model_dump())
+        return state
+
     focus_error = _focus_before_execute(state, step)
     if focus_error is not None:
         focus_error.user_confirmed = user_confirmed
@@ -240,6 +376,8 @@ def execute_node(state: AgentState) -> AgentState:
         return state
 
     result = ActionExecutor(dry_run=state.dry_run).execute(step, state.last_located_target)
+    if state.dry_run and step.action == "focus_window":
+        step.metadata["dry_run_simulated_focus"] = True
     result.user_confirmed = user_confirmed
     result.user_decision = user_decision
     result.manual_override = manual_coords is not None

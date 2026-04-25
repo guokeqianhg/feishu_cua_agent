@@ -38,9 +38,11 @@ class ReportWriter:
             f"- Status: {report.status}",
             f"- Duration Seconds: {report.duration_seconds:.2f}",
             f"- Failure Category: {report.failure_category}",
-            "",
-            "## Runtime Mode",
         ]
+        if report.parsed_intent:
+            lines.extend(["", "## Parsed Intent"])
+            lines.extend(f"- {key}: {value}" for key, value in report.parsed_intent.items())
+        lines.extend(["", "## Runtime Mode"])
         if report.runtime:
             lines.extend(
                 [
@@ -55,6 +57,11 @@ class ReportWriter:
                     f"- Abort File: {report.runtime.abort_file}",
                     f"- Allow Unhealthy Screenshot: {report.runtime.allow_unhealthy_screenshot}",
                     f"- Allow Mock Real Execution: {report.runtime.allow_mock_real_execution}",
+                    f"- Allow Send Message: {report.runtime.allow_send_message}",
+                    f"- Allowed IM Target: {report.runtime.allowed_im_target or ''}",
+                    f"- Allow Doc Create: {report.runtime.allow_doc_create}",
+                    f"- Allow Calendar Create: {report.runtime.allow_calendar_create}",
+                    f"- Allow Calendar Invite: {report.runtime.allow_calendar_invite}",
                     f"- Monitor Index: {report.runtime.monitor_index}",
                 ]
             )

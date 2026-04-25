@@ -1,0 +1,19 @@
+id: im_send_message_guarded_001
+name: 飞书 IM 受保护发送测试消息
+product: im
+instruction: "在飞书 IM 中搜索显式允许的测试会话，发送一条无害测试消息，并验证发送结果。"
+preconditions:
+  - 飞书桌面客户端已打开并登录。
+  - 必须使用测试群或测试联系人，不要在重要聊天窗口测试。
+  - 必须显式设置 CUA_LARK_ALLOW_SEND_MESSAGE=true。
+  - 必须显式设置 CUA_LARK_ALLOWED_IM_TARGET，并与 metadata.target 保持一致。
+expected_result: "仅当安全开关和允许目标匹配时，测试消息才会发送到指定测试会话。"
+tags:
+  - im
+  - guarded
+  - e2e
+timeout_seconds: 300
+metadata:
+  plan_template: im_send_message_guarded
+  target: "测试群"
+  message: "CUA-Lark guarded smoke message"

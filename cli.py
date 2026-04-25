@@ -3,13 +3,18 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime
+from pathlib import Path
 from uuid import uuid4
+
+import yaml
 
 from agent.graph import build_graph
 from agent.state import AgentState
 from app.config import settings
 from core.runtime import mock_real_execution_block_reason, runtime_context
 from core.schemas import TestCase
+from intent.parser import enrich_case_with_intent, parse_instruction
 from storage.artifact_store import ArtifactStore
 from storage.case_loader import load_case
 from agent.nodes.report import report_node
@@ -63,14 +68,97 @@ def run_case(case: TestCase, step_by_step: bool | None = None, auto_debug: bool 
         return report_node(state)
 
 
+def _suite_case_paths(suite_path: Path) -> tuple[str, list[Path]]:
+    payload = yaml.safe_load(suite_path.read_text(encoding="utf-8")) or {}
+    suite_name = str(payload.get("name") or payload.get("id") or suite_path.stem)
+    cases: list[Path] = []
+    for item in payload.get("cases", []):
+        raw_path = item.get("path") if isinstance(item, dict) else item
+        if not raw_path:
+            continue
+        path = Path(str(raw_path))
+        if not path.is_absolute():
+            path = suite_path.parent / path
+        cases.append(path)
+    return suite_name, cases
+
+
+def run_suite(path: str, step_by_step: bool | None = None, auto_debug: bool | None = None) -> dict:
+    suite_path = Path(path)
+    suite_name, case_paths = _suite_case_paths(suite_path)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    suite_dir = Path(settings.artifact_root) / "reports" / f"suite_{stamp}_{uuid4().hex[:8]}"
+    suite_dir.mkdir(parents=True, exist_ok=True)
+
+    results = []
+    for case_path in case_paths:
+        try:
+            state = run_case(load_case(str(case_path)), step_by_step=step_by_step, auto_debug=auto_debug)
+            results.append(
+                {
+                    "case_path": str(case_path),
+                    "case_id": state.test_case.id,
+                    "product": state.run_report.product if state.run_report else state.test_case.product,
+                    "status": state.status,
+                    "summary": state.report_summary,
+                    "report_dir": state.artifacts_dir,
+                    "summary_json": state.summary_json_path,
+                    "summary_md": state.summary_md_path,
+                }
+            )
+        except SystemExit as exc:
+            results.append({"case_path": str(case_path), "status": "error", "error": f"case exited with code {exc.code}"})
+        except Exception as exc:
+            results.append({"case_path": str(case_path), "status": "error", "error": str(exc)})
+
+    total = len(results)
+    passed = sum(1 for item in results if item.get("status") == "pass")
+    failed = sum(1 for item in results if item.get("status") in {"fail", "error", "aborted"})
+    products = sorted({str(item.get("product")) for item in results if item.get("product")})
+    summary = {
+        "suite_name": suite_name,
+        "suite_path": str(suite_path),
+        "status": "pass" if total and passed == total else "fail",
+        "total": total,
+        "passed": passed,
+        "failed": failed,
+        "products": products,
+        "results": results,
+        "suite_dir": str(suite_dir),
+    }
+    (suite_dir / "suite_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    lines = [
+        "# CUA-Lark Suite Report",
+        "",
+        f"- Suite: {suite_name}",
+        f"- Status: {summary['status']}",
+        f"- Total: {total}",
+        f"- Passed: {passed}",
+        f"- Failed: {failed}",
+        f"- Products: {', '.join(products)}",
+        "",
+        "| Case | Product | Status | Report | Summary |",
+        "|---|---|---|---|---|",
+    ]
+    for item in results:
+        lines.append(
+            f"| {item.get('case_id') or item.get('case_path')} | {item.get('product', '')} | "
+            f"{item.get('status')} | {item.get('summary_md') or item.get('report_dir') or ''} | "
+            f"{item.get('summary') or item.get('error') or ''} |"
+        )
+    (suite_dir / "suite_summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return summary
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run CUA-Lark test cases.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     run = sub.add_parser("run", help="Run a natural language instruction.")
-    run.add_argument("--instruction", required=True)
+    run.add_argument("--instruction", help="Natural language instruction. If omitted, CLI will prompt for it.")
     run.add_argument("--product", default="unknown")
     run.add_argument("--expected-result", default="")
+    run.add_argument("--show-intent", action="store_true", help="Parse and print intent without executing the task.")
     run.add_argument("--step-by-step", action="store_true", help="Preview every action and wait for y/n/q or c x y.")
     run.add_argument("--auto-debug", action="store_true", help="Preview actions, execute automatically, and stop on unsafe state or failed verification.")
 
@@ -78,6 +166,11 @@ def main() -> None:
     run_case_cmd.add_argument("path")
     run_case_cmd.add_argument("--step-by-step", action="store_true", help="Preview every action and wait for y/n/q or c x y.")
     run_case_cmd.add_argument("--auto-debug", action="store_true", help="Preview actions, execute automatically, and stop on unsafe state or failed verification.")
+
+    run_suite_cmd = sub.add_parser("run-suite", help="Run a YAML suite of test cases.")
+    run_suite_cmd.add_argument("path")
+    run_suite_cmd.add_argument("--step-by-step", action="store_true", help="Preview every action and wait for y/n/q or c x y.")
+    run_suite_cmd.add_argument("--auto-debug", action="store_true", help="Preview actions, execute automatically, and stop on unsafe state or failed verification.")
 
     diag = sub.add_parser("screenshot-diagnostics", help="Diagnose MSS screenshot capture.")
     diag.add_argument("--configured-only", action="store_true", help="Only capture CUA_LARK_MONITOR_INDEX.")
@@ -116,14 +209,34 @@ def main() -> None:
                     print(f"- {cause}")
         raise SystemExit(0)
 
+    if args.command == "run-suite":
+        summary = run_suite(
+            args.path,
+            step_by_step=getattr(args, "step_by_step", False) or settings.step_by_step,
+            auto_debug=getattr(args, "auto_debug", False) or settings.auto_debug,
+        )
+        print(f"Suite {summary['status']}: {summary['passed']}/{summary['total']} cases passed. Products={summary['products']}")
+        print(f"suite_dir={summary['suite_dir']}")
+        print(f"suite_summary_json={Path(summary['suite_dir']) / 'suite_summary.json'}")
+        print(f"suite_summary_md={Path(summary['suite_dir']) / 'suite_summary.md'}")
+        raise SystemExit(0)
+
     if args.command == "run":
+        instruction = args.instruction or input("请输入自然语言任务 / Instruction: ").strip()
+        if not instruction:
+            raise SystemExit("instruction cannot be empty")
+        if getattr(args, "show_intent", False):
+            parsed = parse_instruction(instruction, args.product)
+            print(json.dumps(parsed.model_dump(), ensure_ascii=False, indent=2))
+            raise SystemExit(0)
         case = TestCase(
             id=f"manual_{uuid4().hex[:8]}",
             name="CLI natural-language run",
             product=args.product,
-            instruction=args.instruction,
+            instruction=instruction,
             expected_result=args.expected_result,
         )
+        case = enrich_case_with_intent(case)
     else:
         case = load_case(args.path)
 

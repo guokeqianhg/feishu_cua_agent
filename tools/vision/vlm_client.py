@@ -3,10 +3,13 @@ from __future__ import annotations
 import base64
 import json
 import re
+import tempfile
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any
 
 from openai import OpenAI
+from PIL import Image
 
 from app.config import settings
 from core.schemas import (
@@ -29,7 +32,23 @@ def _json_payload(text: str) -> dict[str, Any]:
     end = raw.rfind("}")
     if start >= 0 and end > start:
         raw = raw[start : end + 1]
-    return json.loads(raw)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        repaired = _repair_json_payload(raw)
+        return json.loads(repaired)
+
+
+def _repair_json_payload(raw: str) -> str:
+    # Some vision models occasionally emit {"bbox": {"x1": 1, 2, 3, 4}}.
+    # Keep the repair narrow so genuinely invalid output still fails safely.
+    number = r"-?\d+(?:\.\d+)?"
+    bbox_pattern = re.compile(
+        rf'("bbox"\s*:\s*)\{{\s*"x1"\s*:\s*({number})\s*,\s*({number})\s*,\s*({number})\s*,\s*({number})\s*\}}'
+    )
+    repaired = bbox_pattern.sub(r'\1{"x1": \2, "y1": \3, "x2": \4, "y2": \5}', raw)
+    repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+    return repaired
 
 
 def _product_from_text(text: str) -> str:
@@ -49,6 +68,16 @@ def _quoted_value(text: str, default: str) -> str:
 
 
 def _bbox(payload: Any) -> BoundingBox | None:
+    if isinstance(payload, list) and len(payload) >= 4:
+        try:
+            return BoundingBox(
+                x1=int(float(payload[0])),
+                y1=int(float(payload[1])),
+                x2=int(float(payload[2])),
+                y2=int(float(payload[3])),
+            )
+        except Exception:
+            return None
     if not isinstance(payload, dict):
         return None
     try:
@@ -60,6 +89,52 @@ def _bbox(payload: Any) -> BoundingBox | None:
         )
     except Exception:
         return None
+
+
+def _image_size(path: str) -> tuple[int, int]:
+    with Image.open(path) as image:
+        return image.size
+
+
+def _resized_copy_for_model(path: str, max_side: int = 1280) -> tuple[str, tuple[int, int], tuple[int, int]]:
+    original_size = _image_size(path)
+    original_w, original_h = original_size
+    longest = max(original_w, original_h)
+    if longest <= max_side:
+        return path, original_size, original_size
+
+    scale = max_side / longest
+    resized_size = (max(1, round(original_w * scale)), max(1, round(original_h * scale)))
+    with Image.open(path) as image:
+        resized = image.convert("RGB").resize(resized_size, Image.Resampling.LANCZOS)
+        tmp = tempfile.NamedTemporaryFile(prefix="cua_vlm_", suffix=".png", delete=False)
+        tmp_path = tmp.name
+        tmp.close()
+        resized.save(tmp_path)
+    return tmp_path, original_size, resized_size
+
+
+def _project_point_to_original(point: tuple[int, int] | None, original_size: tuple[int, int], model_size: tuple[int, int]) -> tuple[int, int] | None:
+    if point is None:
+        return None
+    if original_size == model_size:
+        return point
+    sx = original_size[0] / max(model_size[0], 1)
+    sy = original_size[1] / max(model_size[1], 1)
+    return (round(point[0] * sx), round(point[1] * sy))
+
+
+def _project_bbox_to_original(bbox: BoundingBox | None, original_size: tuple[int, int], model_size: tuple[int, int]) -> BoundingBox | None:
+    if bbox is None or original_size == model_size:
+        return bbox
+    sx = original_size[0] / max(model_size[0], 1)
+    sy = original_size[1] / max(model_size[1], 1)
+    return BoundingBox(
+        x1=round(bbox.x1 * sx),
+        y1=round(bbox.y1 * sy),
+        x2=round(bbox.x2 * sx),
+        y2=round(bbox.y2 * sy),
+    )
 
 
 def _normalize_verification_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -189,7 +264,7 @@ class MockVLMClient(BaseVLMClient):
         )
 
     def locate_element(self, observation: Observation, step: PlanStep) -> LocatedTarget:
-        if step.action in ("wait", "hotkey", "type_text", "verify", "finish"):
+        if step.action in ("wait", "hotkey", "type_text", "focus_window", "verify", "finish"):
             return LocatedTarget(step_id=step.id, source="none", confidence=1.0, reason="Action does not require pointer location.")
         if step.coordinates:
             return LocatedTarget(step_id=step.id, source="manual", center=step.coordinates, confidence=1.0, reason="Coordinates provided by plan.")
@@ -261,6 +336,24 @@ class OpenAICompatibleVLMClient(MockVLMClient):
         )
         return (resp.choices[0].message.content or "").strip()
 
+    def _chat_vision_resized(self, prompt: str, screenshot_path: str) -> tuple[str, dict[str, Any]]:
+        model_path, original_size, model_size = _resized_copy_for_model(screenshot_path)
+        metadata = {
+            "original_size": {"width": original_size[0], "height": original_size[1]},
+            "model_image_size": {"width": model_size[0], "height": model_size[1]},
+            "coordinate_space": "model_image",
+            "resized_for_model": model_path != screenshot_path,
+        }
+        try:
+            text = self._chat_vision(prompt, model_path)
+            return text, metadata
+        finally:
+            if model_path != screenshot_path:
+                try:
+                    Path(model_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+
     def create_plan(self, case: TestCase, observation: Observation | None = None) -> TestPlan:
         if self._is_safe_smoke(case):
             return super().create_plan(case, observation)
@@ -269,7 +362,7 @@ class OpenAICompatibleVLMClient(MockVLMClient):
 Convert this Feishu/Lark desktop GUI test case into executable JSON.
 Return exactly these fields: goal, product, steps, success_criteria, assumptions.
 Each step must contain: id, action, target_description, input_text, hotkeys, scroll_amount, wait_seconds, expected_state, retry_limit.
-Allowed actions: click, double_click, right_click, drag, scroll, type_text, hotkey, wait, verify, finish.
+Allowed actions: click, double_click, right_click, drag, scroll, type_text, hotkey, wait, focus_window, verify, finish.
 
 Case:
 {case.model_dump_json()}
@@ -334,19 +427,36 @@ OCR lines:
             return observation
 
     def locate_element(self, observation: Observation, step: PlanStep) -> LocatedTarget:
-        if step.action in ("wait", "hotkey", "type_text", "verify", "finish"):
+        if step.action in ("wait", "hotkey", "focus_window", "verify", "finish"):
             return super().locate_element(observation, step)
+        original_size = _image_size(observation.screenshot_path)
+        model_max_side = 1280
         prompt = f"""
-Locate the target UI element for this Feishu/Lark GUI action.
-Return JSON with: bbox, center, confidence, reason.
-bbox format: {{"x1": 0, "y1": 0, "x2": 100, "y2": 100}}.
-center format: [x, y].
+You are a UI element locator for Feishu/Lark desktop client.
+Your task is to locate the target UI element from the screenshot and return ONLY a valid JSON object, NO other text or explanation.
 
-Step:
-{step.model_dump_json()}
+REQUIRED JSON FIELDS:
+- "bbox": Bounding box of the element, format: {{"x1": integer, "y1": integer, "x2": integer, "y2": integer}}.
+- "center": Center coordinate of the element, format: [x_integer, y_integer]
+- "confidence": Float between 0 and 1, how confident you are that this is the correct target
+- "reason": Short string explaining your detection
+- "target_absent": Boolean, true if the target is not visible in the screenshot
+
+RULES:
+1. ONLY return the JSON object, NO markdown, NO code blocks, NO extra text before or after
+2. Use double quotes for all JSON keys and string values
+3. All numbers must be integers, no floats in coordinates
+4. If target is not visible / search results are empty: return {{"bbox": null, "center": null, "confidence": 0, "target_absent": true, "reason": "target not visible"}}
+5. Only locate clickable elements that are clearly visible in the screenshot
+6. For search results, locate the FIRST result row that matches the target name
+7. Coordinates must be relative to the image you are given. The original screenshot is {original_size[0]}x{original_size[1]}; this image may be resized to max side {model_max_side}. Do not compensate for scaling yourself.
+
+Target element to locate: {step.target_description}
+Step action: {step.action}
 """.strip()
         try:
-            payload = _json_payload(self._chat_vision(prompt, observation.screenshot_path))
+            text, coordinate_metadata = self._chat_vision_resized(prompt, observation.screenshot_path)
+            payload = _json_payload(text)
             bbox = _bbox(payload.get("bbox"))
             center_payload = payload.get("center")
             center = None
@@ -354,17 +464,43 @@ Step:
                 center = (int(float(center_payload[0])), int(float(center_payload[1])))
             if center is None and bbox:
                 center = bbox.center()
+            model_size = (
+                int(coordinate_metadata["model_image_size"]["width"]),
+                int(coordinate_metadata["model_image_size"]["height"]),
+            )
+            bbox = _project_bbox_to_original(bbox, original_size, model_size)
+            center = _project_point_to_original(center, original_size, model_size)
+            confidence = float(payload.get("confidence", 0.0) or 0.0)
+            target_absent = bool(payload.get("target_absent"))
+            warnings = []
+            recommended_action = "continue"
+            if target_absent or center is None or confidence < 0.45:
+                warnings.append("VLM could not confidently locate a visible target; action is unsafe.")
+                recommended_action = "abort"
             return LocatedTarget(
                 step_id=step.id,
                 target_description=step.target_description,
                 source="vlm",
                 bbox=bbox,
                 center=center,
-                confidence=float(payload.get("confidence", 0.0) or 0.0),
+                confidence=confidence,
                 reason=str(payload.get("reason", "")),
-                metadata=payload,
+                warnings=warnings,
+                recommended_action=recommended_action,
+                metadata={**payload, **coordinate_metadata, "returned_coordinate_space": "original_screenshot"},
             )
         except Exception as exc:
+            if not settings.dry_run:
+                return LocatedTarget(
+                    step_id=step.id,
+                    target_description=step.target_description,
+                    source="none",
+                    confidence=0.0,
+                    reason="Real VLM locate_element failed; heuristic fallback is disabled during real desktop execution.",
+                    warnings=[f"Real VLM locate_element failed: {exc}"],
+                    recommended_action="abort",
+                    metadata={"provider": "vlm_error", "error": str(exc)},
+                )
             located = super().locate_element(observation, step)
             located.warnings.append(f"Real VLM locate_element failed and fell back to mock locator: {exc}")
             located.metadata["fallback_error"] = str(exc)

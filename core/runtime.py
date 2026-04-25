@@ -28,6 +28,11 @@ def runtime_context(dry_run_override: bool | None = None) -> RuntimeContext:
         abort_file=settings.abort_file,
         allow_unhealthy_screenshot=settings.allow_unhealthy_screenshot,
         allow_mock_real_execution=settings.allow_mock_real_execution,
+        allow_send_message=settings.allow_send_message,
+        allowed_im_target=settings.allowed_im_target or None,
+        allow_doc_create=settings.allow_doc_create,
+        allow_calendar_create=settings.allow_calendar_create,
+        allow_calendar_invite=settings.allow_calendar_invite,
         monitor_index=settings.monitor_index,
     )
 

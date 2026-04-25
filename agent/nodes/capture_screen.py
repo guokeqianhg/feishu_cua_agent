@@ -14,9 +14,23 @@ window = WindowManager()
 
 
 def _capture(state: AgentState, name: str) -> str:
-    focused = window.focus_lark()
+    step = state.current_step()
+    preserve_foreground = bool(
+        step
+        and (
+            step.metadata.get("preserve_foreground")
+            or (name.endswith("_after_a" + str(state.current_attempt)) and step.metadata.get("preserve_after_foreground"))
+        )
+    )
+    keywords = step.metadata.get("foreground_window_keywords") if step else None
+    if preserve_foreground:
+        focused = True
+    elif keywords and step and step.action == "focus_window":
+        focused = True
+    else:
+        focused = window.focus_lark()
     active_title = window.get_active_window_title()
-    if not focused:
+    if not focused and not preserve_foreground:
         warning = f"Window focus warning: could not confirm Feishu/Lark is foreground. active_window={active_title!r}"
         if warning not in state.warnings:
             state.warnings.append(warning)

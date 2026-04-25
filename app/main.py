@@ -20,6 +20,8 @@ from app.schemas import (
 )
 from core.runtime import mock_real_execution_block_reason, runtime_context
 from core.schemas import TestCase
+from intent.parser import enrich_case_with_intent
+from products.workflows import build_product_plan
 from storage.artifact_store import ArtifactStore
 from storage.case_loader import load_case
 from tools.capture.diagnostics import check_configured_monitor, run_screenshot_diagnostics
@@ -97,6 +99,11 @@ def health() -> dict:
         "auto_debug": context.auto_debug,
         "abort_file": context.abort_file,
         "allow_mock_real_execution": context.allow_mock_real_execution,
+        "allow_send_message": context.allow_send_message,
+        "allowed_im_target_configured": bool(context.allowed_im_target),
+        "allow_doc_create": context.allow_doc_create,
+        "allow_calendar_create": context.allow_calendar_create,
+        "allow_calendar_invite": context.allow_calendar_invite,
     }
 
 
@@ -115,6 +122,7 @@ def run_agent(req: RunRequest) -> RunResponse:
         timeout_seconds=req.timeout_seconds,
         metadata=req.metadata,
     )
+    case = enrich_case_with_intent(case)
     return _response(_invoke(case, req.dry_run))
 
 
@@ -134,7 +142,8 @@ def run_case(req: RunCaseRequest) -> RunResponse:
 @app.post("/plan", response_model=PlanResponse)
 def plan(req: PlanRequest) -> PlanResponse:
     case = TestCase(id=f"plan_{uuid4().hex[:8]}", name="Plan preview", product=req.product, instruction=req.task)
-    return PlanResponse(plan=build_vlm_client().create_plan(case))
+    case = enrich_case_with_intent(case)
+    return PlanResponse(plan=build_product_plan(case) or build_vlm_client().create_plan(case))
 
 
 @app.post("/observe", response_model=ObserveResponse)

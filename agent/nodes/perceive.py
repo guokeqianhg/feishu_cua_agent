@@ -8,8 +8,8 @@ from agent.state import AgentState
 from storage.run_logger import RunLogger
 from tools.desktop.window_manager import WindowManager
 from tools.vision.ocr import OCRClient
-from tools.vision.smoke import is_safe_smoke_case, observe_smoke_screen
 from tools.vision.vlm_client import build_vlm_client
+from verification.registry import local_observe
 
 
 logger = RunLogger()
@@ -31,9 +31,8 @@ def _observe(state: AgentState, screenshot_path: str):
     image = Image.open(screenshot_path)
     raw_text = ocr.extract_text(image)
     window_title = window.get_active_window_title()
-    if is_safe_smoke_case(state.test_case):
-        observation = observe_smoke_screen(screenshot_path, raw_text, window_title)
-    else:
+    observation = local_observe(state.test_case, screenshot_path, raw_text, window_title)
+    if observation is None:
         observation = vlm.describe_screen(screenshot_path, raw_text)
         observation.window_title = window_title
     logger.log(

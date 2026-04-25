@@ -1,13 +1,21 @@
 id: calendar_create_event_001
-name: Create tomorrow afternoon meeting
+name: Guarded Calendar create event
 product: calendar
-instruction: "打开日历，创建一个明天下午2点的会议，邀请张三参加"
+instruction: "打开飞书日历，创建一个测试日程，标题为「CUA-Lark 测试会议」，时间为「明天 10:00」，参会人为「李新元」。"
 preconditions:
   - Feishu desktop client is logged in.
-  - The contact 张三 exists in the organization directory.
-expected_result: "Calendar shows a meeting tomorrow at 2 PM with 张三 as attendee."
+  - The current account can create Calendar events.
+  - Real execution requires CUA_LARK_ALLOW_CALENDAR_CREATE=true.
+expected_result: "A guarded test calendar event is created and visible in Calendar."
 tags:
   - calendar
-  - smoke
+  - guarded
   - e2e
 timeout_seconds: 300
+metadata:
+  plan_template: calendar_create_event_guarded
+  safety_guard_required: true
+  event_title: "CUA-Lark 测试会议"
+  event_time: "明天 10:00"
+  attendees:
+    - "李新元"

@@ -1,0 +1,17 @@
+id: im_search_only_001
+name: 飞书 IM 搜索目标安全用例
+product: im
+instruction: "在飞书 IM 中打开搜索框，输入测试关键词，只观察搜索结果，不进入会话，不发送消息。"
+preconditions:
+  - 飞书桌面客户端已打开并登录。
+  - 请先完成 screenshot-diagnostics 和 inspect-screen。
+expected_result: "搜索关键词已输入，搜索结果或空状态可见；不会进入聊天会话，也不会发送消息。"
+tags:
+  - im
+  - smoke
+  - safe
+  - no-send
+timeout_seconds: 120
+metadata:
+  plan_template: im_search_only
+  search_text: harmless-smoke-test

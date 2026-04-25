@@ -1,0 +1,16 @@
+id: docs_open_smoke_001
+name: 飞书云文档入口安全烟测
+product: docs
+instruction: "打开或切换到飞书云文档入口，只观察云文档页面，不创建、不编辑、不保存任何文档。"
+preconditions:
+  - 飞书桌面客户端已打开并登录。
+  - 请先确认当前屏幕截图健康。
+expected_result: "飞书云文档相关页面或入口可见；不会创建或修改任何文档。"
+tags:
+  - docs
+  - smoke
+  - safe
+  - no-mutation
+timeout_seconds: 120
+metadata:
+  plan_template: docs_open_smoke

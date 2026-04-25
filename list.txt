@@ -1,0 +1,423 @@
+CUA-Lark 后端任务清单、测试方式与下一步计划
+版本：v3
+更新时间：2026-04-25
+
+说明：
+本文档基于当前 backend 代码、README.md、ACCEPTANCE.md、任务规格文档和最近真实运行报告整理。
+所有命令都应先执行：
+
+```powershell
+conda activate agent
+cd D:\找工作\feishu_cua_agent\backend
+```
+
+
+一、当前项目目标
+
+CUA-Lark 后端目标是实现一个飞书桌面 GUI 智能测试 Agent。
+
+它不调用飞书开放平台 API 完成任务，而是像真实用户一样：
+1. 截图观察当前桌面。
+2. 理解自然语言任务。
+3. 规划多步操作。
+4. 用鼠标、键盘真实操作飞书桌面端和浏览器文档编辑器。
+5. 每一步截图验证。
+6. 生成可回放的 summary.md、summary.json、steps.jsonl 和截图证据。
+
+
+二、当前真实 E2E 完成情况
+
+1. IM 发送链路：已跑通
+
+能力：
+1. 搜索联系人或会话。
+2. OCR 校验目标搜索结果行。
+3. 打开目标会话。
+4. 使用当前输入焦点直接输入消息，避免额外乱点、拖动或点到表情。
+5. 安全开关允许后发送消息。
+6. 验证消息在目标会话中可见。
+
+关键保护：
+1. `CUA_LARK_ALLOW_SEND_MESSAGE=true` 是真实发送总开关。
+2. `CUA_LARK_ALLOWED_IM_TARGET` 可限制真实发送目标。
+3. OCR 必须确认目标行，避免误点其他搜索结果。
+4. 打开会话后直接输入，不再额外点击或长按拖动。
+
+推荐命令：
+
+```powershell
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+$env:CUA_LARK_ALLOW_SEND_MESSAGE="true"
+$env:CUA_LARK_ALLOWED_IM_TARGET="吴佳园"
+python -B cli.py run --instruction "在IM中搜索吴佳园，发送一条消息：hello" --auto-debug
+```
+
+
+2. Docs 创建文档链路：已真实验证通过
+
+最近通过报告：
+`runs\reports\run_20260425_220621_3f36cadb`
+
+结果：
+1. `Status=pass`
+2. `Dry Run=False`
+3. `Allow Doc Create=True`
+4. 15 个步骤，12 pass，3 skipped。
+5. 文档标题和正文最终可见。
+
+当前流程：
+1. 聚焦飞书。
+2. 条件式关闭已有浮层或模板预览。
+3. 打开云文档。
+4. hover “新建”，不盲点。
+5. OCR 点击“文档”。
+6. OCR 点击“新建空白文档”的加号区域。
+7. 新文档在浏览器中打开后保持浏览器前台。
+8. 输入标题。
+9. Enter 进入正文。
+10. 输入正文。
+11. 验证标题和正文可见。
+
+推荐命令：
+
+```powershell
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+$env:CUA_LARK_ALLOW_DOC_CREATE="true"
+python -B cli.py run-case cases\docs_create_doc.yaml --auto-debug
+```
+
+
+3. Calendar 创建日程链路：已真实验证通过
+
+最近通过报告：
+`runs\reports\run_20260425_234727_6d3a0cd2`
+
+结果：
+1. `Status=pass`
+2. `Dry Run=False`
+3. `Allow Calendar Create=True`
+4. 16 个步骤，13 pass，3 skipped。
+5. `click_event_start_day` 使用 OCR 定位，点击 `(704, 986)`。
+6. 最终 `verify_event` 本地 OCR 确认 `title_hit=True, date_hit=True, time_hit=True`。
+
+当前流程：
+1. 聚焦飞书。
+2. 条件式关闭 stale 日程编辑器或确认弹窗。
+3. 打开日历。
+4. 选中“日历”页签。
+5. 点击“创建日程”。
+6. 输入标题。
+7. 打开开始日期选择器。
+8. 通过 OCR 识别日期选择器标题和 7 列日期网格。
+9. 根据 `event_date` 计算目标日期格中心，禁止 VLM 猜测兜底。
+10. 输入开始时间和结束时间。
+11. 保存日程。
+12. 等待保存后界面稳定。
+13. 本地 OCR 验证日程标题、日期和时间。
+
+推荐命令：
+
+```powershell
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+$env:CUA_LARK_ALLOW_CALENDAR_CREATE="true"
+$env:CUA_LARK_ALLOW_CALENDAR_INVITE="false"
+python -B cli.py run-case cases\calendar_create_event.yaml --auto-debug
+```
+
+
+三、当前关键技术实现
+
+1. 产品工作流模板
+
+主要文件：
+1. `products\workflows.py`
+2. `intent\parser.py`
+3. `cases\*.yaml`
+
+已覆盖模板：
+1. `im_search_only`
+2. `im_send_message_guarded`
+3. `docs_open_smoke`
+4. `docs_create_doc_guarded`
+5. `calendar_create_event_guarded`
+
+
+2. OCR / 视觉 / 布局混合定位
+
+主要文件：
+1. `tools\vision\lark_locator.py`
+2. `tools\vision\ocr_client.py`
+3. `agent\nodes\decide.py`
+
+已完成：
+1. IM 搜索结果 OCR 精确目标行。
+2. Docs 新建菜单和空白文档卡片 OCR 定位。
+3. Calendar 创建按钮、保存按钮、日历页签 OCR 定位。
+4. Calendar 日期选择器按年月标题和 7 列网格定位目标日期。
+5. 对关键 Calendar 日期点击启用 `require_lark_locator`，定位失败即停，不退回 VLM 猜测。
+6. 对 VLM 坐标做缩放校正，兼容截图 resize 后坐标反投影问题。
+
+
+3. 条件式闭环动作
+
+主要文件：
+1. `core\schemas.py`
+2. `tools\desktop\executor.py`
+3. `agent\nodes\execute.py`
+
+已完成动作类型：
+1. `hover`
+2. `focus_window`
+3. `conditional_hotkey`
+4. `conditional_click`
+
+用途：
+1. 只有检测到浮层时才按 Esc。
+2. 只有检测到关闭按钮时才点击。
+3. Docs 创建文档时使用 hover 打开菜单。
+4. 防止硬编码式开环操作。
+
+
+4. 本地验证
+
+主要文件：
+1. `verification\registry.py`
+2. `tools\vision\ocr_client.py`
+
+已完成：
+1. IM smoke 本地验证。
+2. Docs 可见性验证。
+3. Calendar 可见性验证。
+4. Calendar 最终日程 OCR 验证。
+5. 避免最终 VLM 将已成功的 Calendar 日程误判为失败。
+
+
+四、当前已有 case
+
+1. `cases\smoke_search_only.yaml`
+- IM 安全搜索 smoke。
+- 不进入会话，不发送消息。
+
+2. `cases\im_search_only.yaml`
+- IM 搜索目标安全用例。
+- 不发送消息。
+
+3. `cases\im_send_message_guarded.yaml`
+- 受保护 IM 发送。
+- 需要 `CUA_LARK_ALLOW_SEND_MESSAGE=true`。
+
+4. `cases\docs_open_smoke.yaml`
+- Docs 入口安全 smoke。
+- 不创建、不编辑文档。
+
+5. `cases\docs_create_doc.yaml`
+- 受保护 Docs 创建测试文档。
+- 需要 `CUA_LARK_ALLOW_DOC_CREATE=true`。
+- 已真实验证通过。
+
+6. `cases\calendar_create_event.yaml`
+- 受保护 Calendar 创建测试日程。
+- 需要 `CUA_LARK_ALLOW_CALENDAR_CREATE=true`。
+- 已真实验证通过。
+
+7. `cases\safe_smoke_suite.yaml`
+- IM + Docs 安全 smoke suite。
+
+
+五、推荐验收顺序
+
+1. 导入检查：
+
+```powershell
+$env:PYTHONIOENCODING="utf-8"
+$env:PYTHONDONTWRITEBYTECODE="1"
+python -B -c "import cli; import app.main; import tools.vision.ocr_client; print('imports ok')"
+```
+
+2. 截图诊断：
+
+```powershell
+python cli.py screenshot-diagnostics --configured-only
+python cli.py inspect-screen
+```
+
+3. mock / dry-run：
+
+```powershell
+$env:CUA_LARK_MODEL_PROVIDER="mock"
+$env:DRY_RUN="true"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="true"
+python -B cli.py run-suite cases\safe_smoke_suite.yaml --auto-debug
+```
+
+4. IM 安全 smoke：
+
+```powershell
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+python -B cli.py run-case cases\smoke_search_only.yaml --auto-debug
+```
+
+5. Docs 创建文档：
+
+```powershell
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+$env:CUA_LARK_ALLOW_DOC_CREATE="true"
+python -B cli.py run-case cases\docs_create_doc.yaml --auto-debug
+```
+
+6. Calendar 创建日程：
+
+```powershell
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+$env:CUA_LARK_ALLOW_CALENDAR_CREATE="true"
+$env:CUA_LARK_ALLOW_CALENDAR_INVITE="false"
+python -B cli.py run-case cases\calendar_create_event.yaml --auto-debug
+```
+
+
+六、对照任务规格的完成度
+
+M1 单步操作：
+状态：基本完成。
+
+已完成：
+1. 截图。
+2. 点击。
+3. hover。
+4. 输入。
+5. 快捷键。
+6. wait。
+7. 窗口聚焦。
+8. 条件式点击和条件式快捷键。
+
+待补强：
+1. double_click 在更多真实飞书场景中验证。
+2. right_click 在更多真实飞书场景中验证。
+3. drag 在更多真实飞书场景中验证。
+4. scroll 在更多真实飞书场景中验证。
+
+
+M2 流程串联：
+状态：完成 MVP。
+
+已完成：
+1. IM 搜索、打开会话、发送、验证。
+2. Docs 新建文档、输入标题正文、验证。
+3. Calendar 新建日程、选择日期时间、保存、验证。
+
+
+M3 多产品覆盖：
+状态：已达到最低要求并超过 2 个产品。
+
+已完成：
+1. IM。
+2. Docs。
+3. Calendar。
+
+待扩展：
+1. Base。
+2. VC。
+3. Mail。
+
+
+M4 评估体系：
+状态：基本完成。
+
+已完成：
+1. summary.md。
+2. summary.json。
+3. steps.jsonl。
+4. screenshots。
+5. suite_summary。
+6. 运行模式、安全开关、截图诊断、每步坐标、输入和验证原因记录。
+
+
+M5 进阶优化：
+状态：部分完成。
+
+已完成：
+1. 截图健康检查。
+2. 黑屏保护。
+3. mock 真实执行保护。
+4. abort 中断。
+5. auto-debug。
+6. OCR 与布局混合定位。
+7. 条件式闭环弹窗处理。
+
+待补强：
+1. 更系统的自愈重规划。
+2. Accessibility / UI Automation 融合。
+3. 录制回放。
+4. 自动生成更多测试用例。
+5. 失败报告自动归因和修复建议。
+
+
+七、当前总体完成度估计
+
+1. 工程结构：85%
+2. CLI/API：80%
+3. 截图诊断：90%
+4. IM 真实 E2E：85%
+5. Docs 创建 E2E：80%
+6. Calendar 创建 E2E：80%
+7. 报告体系：85%
+8. 安全调试闭环：85%
+9. OCR/混合定位：70%
+10. 自愈重规划：35%
+11. 交付文档/Demo：55%
+
+整体 MVP 完成度：
+约 75%-85%。
+
+
+八、下一步建议
+
+优先级 1：稳定化与回归
+1. 把 IM、Docs、Calendar 三条真实 E2E 各再跑 2-3 次。
+2. 汇总失败样本，补齐定位和验证边界。
+3. 建立一个只 dry-run / mock 的 CI 风格检查命令。
+
+优先级 2：Accessibility / OCR 融合
+1. 引入 Windows UI Automation 获取控件 bbox。
+2. 用 OCR 确认文字，用 accessibility 确认控件角色和 bbox。
+3. 点击时使用 bbox 中心或安全区域。
+
+优先级 3：更多产品覆盖
+1. Base。
+2. VC。
+3. Mail。
+
+优先级 4：交付材料
+1. Demo 视频。
+2. 答辩 PPT。
+3. system_design.md 补充架构图。
+4. evaluation.md 补充真实运行结果表。
+
+
+九、注意事项
+
+1. 永远不要提交 `.env`。
+2. 永远不要提交 API Key、Authorization header、真实 cookies。
+3. `runs/` 报告截图可能包含真实桌面内容，默认不要提交到 GitHub。
+4. 真实 IM 发送只对测试联系人或测试群执行。
+5. Docs / Calendar 创建只使用无害测试标题和测试内容。
+6. 如果截图黑屏、窗口不对或 mock 回退，不要强行真实执行。
+
+
+十、结论
+
+当前项目已经具备可演示的飞书桌面 GUI Agent MVP：
+1. 能理解自然语言和 YAML case。
+2. 能真实操作飞书。
+3. 能覆盖 IM、Docs、Calendar 三个子产品。
+4. 能输出可回放报告。
+5. 有安全开关和条件式闭环处理。
+6. Calendar 日期选择已经从 VLM 猜测改成 OCR 网格定位，避免误点到相邻日期或月份。
+
+下一阶段建议从“能跑通”转向“多次回归稳定”和“更强闭环感知”。

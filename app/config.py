@@ -63,6 +63,11 @@ class Settings(BaseModel):
     allow_unhealthy_screenshot: bool = os.getenv("CUA_LARK_ALLOW_UNHEALTHY_SCREENSHOT", "false").lower() == "true"
     allow_mock_real_execution: bool = os.getenv("CUA_LARK_ALLOW_MOCK_REAL_EXECUTION", "false").lower() == "true"
     auto_select_healthy_monitor: bool = os.getenv("CUA_LARK_AUTO_SELECT_HEALTHY_MONITOR", "true").lower() == "true"
+    allow_send_message: bool = os.getenv("CUA_LARK_ALLOW_SEND_MESSAGE", "false").lower() == "true"
+    allowed_im_target: str = os.getenv("CUA_LARK_ALLOWED_IM_TARGET", "")
+    allow_doc_create: bool = os.getenv("CUA_LARK_ALLOW_DOC_CREATE", "false").lower() == "true"
+    allow_calendar_create: bool = os.getenv("CUA_LARK_ALLOW_CALENDAR_CREATE", "false").lower() == "true"
+    allow_calendar_invite: bool = os.getenv("CUA_LARK_ALLOW_CALENDAR_INVITE", "false").lower() == "true"
 
 
 settings = Settings()

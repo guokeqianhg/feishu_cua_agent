@@ -5,6 +5,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageStat
 
 from core.schemas import Observation, PlanStep, StepVerification, TestCase
+from tools.vision.lark_locator import strategy_bbox_from_screenshot
 
 
 SEARCH_DIALOG_INPUT_BOX = (190, 265, 1025, 325)
@@ -68,8 +69,14 @@ def verify_smoke_step(step: PlanStep, before: Observation | None, after: Observa
         )
 
     if step.id == "type_safe_query":
-        changed = _crop_diff(before.screenshot_path if before else None, after.screenshot_path, SEARCH_DIALOG_INPUT_BOX)
-        has_input_marks = _input_crop_has_text_like_pixels(after.screenshot_path, SEARCH_DIALOG_INPUT_BOX)
+        dynamic_box = strategy_bbox_from_screenshot(after.screenshot_path, "search_dialog_input")
+        box = (
+            (dynamic_box.x1, dynamic_box.y1, dynamic_box.x2, dynamic_box.y2)
+            if dynamic_box
+            else SEARCH_DIALOG_INPUT_BOX
+        )
+        changed = _crop_diff(before.screenshot_path if before else None, after.screenshot_path, box)
+        has_input_marks = _input_crop_has_text_like_pixels(after.screenshot_path, box)
         success = changed > 1.0 and has_input_marks
         return StepVerification(
             success=success,

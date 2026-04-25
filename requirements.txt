@@ -12,3 +12,4 @@ pillow==10.4.0
 opencv-python==4.10.0.84
 numpy==2.1.1
 PyYAML==6.0.2
+rapidocr_onnxruntime==1.4.4

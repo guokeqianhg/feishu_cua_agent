@@ -5,8 +5,8 @@ import time
 from agent.state import AgentState
 from core.schemas import PlanStep, StepRunRecord, StepVerification
 from storage.run_logger import RunLogger
-from tools.vision.smoke import is_safe_smoke_case, verify_smoke_case, verify_smoke_step
 from tools.vision.vlm_client import build_vlm_client
+from verification.registry import local_verify_case, local_verify_step
 
 
 logger = RunLogger()
@@ -98,9 +98,19 @@ def verify_step_node(state: AgentState) -> AgentState:
         status = "fail"
         error = state.last_action_result.error_message or state.last_action_result.message
     else:
-        if is_safe_smoke_case(state.test_case):
-            verification = verify_smoke_step(step, state.before_observation, state.after_observation)
+        if state.runtime and state.runtime.dry_run:
+            verification = StepVerification(
+                success=True,
+                confidence=0.75,
+                reason=f"Dry-run simulated step success for {step.id}; no real desktop state change was required.",
+                matched_criteria=[step.expected_state or step.id],
+                raw_model_output={"provider": "local_runtime", "dry_run": True},
+            )
         else:
+            verification = None
+        if not (state.runtime and state.runtime.mock_verification):
+            verification = verification or local_verify_step(state.test_case, step, state.before_observation, state.after_observation)
+        if verification is None:
             verification = vlm.verify_step(step, state.before_observation, state.after_observation)
             verification = _enforce_real_verification(state, step, verification)
         state.last_verification = verification
@@ -155,9 +165,23 @@ def final_verify_node(state: AgentState) -> AgentState:
         state.failure_category = "planning_failed"
         state.error = "No plan available for final verification."
         return state
-    if is_safe_smoke_case(state.test_case):
-        verification = verify_smoke_case(state.test_case, state.final_observation)
-    else:
+    if state.runtime and state.runtime.dry_run:
+        verification = StepVerification(
+            success=True,
+            confidence=0.75,
+            reason="Dry-run final verification passed. No real Feishu desktop action was performed.",
+            matched_criteria=state.plan.success_criteria,
+            raw_model_output={"provider": "local_runtime", "dry_run": True},
+        )
+        state.final_verification = verification
+        state.status = "pass"
+        state.failure_category = "none"
+        logger.log(state, "final_verify", "Dry-run final verification completed", verification=verification.model_dump())
+        return state
+    verification = None
+    if not (state.runtime and state.runtime.mock_verification):
+        verification = local_verify_case(state.test_case, state.final_observation)
+    if verification is None:
         verification = vlm.verify_case(state.test_case, state.plan, state.final_observation)
     if _is_real_execution(state) and _raw_provider(verification) in ("mock", "vlm_error"):
         warning = f"Real execution final verification warning: used {_raw_provider(verification)} result instead of real VLM verification."

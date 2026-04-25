@@ -1,271 +1,42 @@
 # CUA-Lark 后端
 
-这是 CUA-Lark 智能测试 Agent 的后端实现。当前重点是从 `mock + dry_run` 的本地验证，逐步走向真实飞书桌面验证。
+CUA-Lark 后端用于运行飞书桌面 GUI 自动化测试。当前实现重点是：截图诊断、运行模式可见性、mock/dry_run 基线、真实桌面安全 smoke、产品工作流模板、OCR/视觉混合定位、本地快速验证、可回放报告和 suite 级评估。
 
-当前架构：
+当前已真实验证通过的主链路：
 
-- Python 作为主运行时。
-- FastAPI 提供服务接口。
-- LangGraph 编排 Agent 执行流程。
-- MSS/Pillow 进行截图采集，并提供截图健康诊断。
-- PyAutoGUI/Pyperclip 执行桌面鼠标键盘操作。
-- OpenAI-compatible LLM/VLM 适配层，并提供确定性的 Mock Provider。
-- 每次运行都会输出结构化 JSON 报告和 Markdown 报告。
+- IM：搜索指定联系人/会话并在安全开关允许后发送消息。
+- Docs：在云文档中新建空白文档，写入标题和正文，并验证内容可见。
+- Calendar：在日历中新建测试日程，OCR 网格定位目标日期，填写时间并保存，最终用本地 OCR 验证日程可见。
 
-## 本地运行
+## 快速开始
 
-所有命令都在 `agent` conda 环境中执行：
+所有命令建议在 `agent` conda 环境中运行：
 
 ```powershell
 conda activate agent
 cd D:\找工作\feishu_cua_agent\backend
 ```
 
-## 配置文件
-
-后端启动时会自动读取：
-
-```text
-backend\.env
-```
-
-你可以先复制示例文件：
+复制配置模板：
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-然后在 `.env` 中填写模型 API 配置：
+在 `.env` 中填写真实模型配置。不要提交 `.env`，不要把 API Key 或 Authorization header 写入日志、报告或 README。
 
-```text
-CUA_LARK_MODEL_PROVIDER=auto
-OPENAI_API_KEY=replace_me
-OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-OPENAI_MODEL_TEXT=qwen-plus
-OPENAI_MODEL_VISION=qwen-vl-max
-```
+PowerShell 中临时设置的环境变量优先级高于 `.env`。
 
-常用运行配置也可以写在同一个文件里：
+## 推荐调试顺序
 
-```text
-DRY_RUN=true
-CUA_LARK_PLACEHOLDER_SCREENSHOT=true
-CUA_LARK_MONITOR_INDEX=1
-CUA_LARK_STEP_BY_STEP=false
-CUA_LARK_AUTO_DEBUG=false
-```
-
-读取规则：
-
-- 默认读取 `backend\.env`。
-- PowerShell 里手动设置的环境变量优先级更高，会覆盖 `.env`。
-- 如果想指定其它配置文件，可以设置 `CUA_LARK_ENV_FILE`。
-
-示例：
+先确认截图链路健康：
 
 ```powershell
-$env:CUA_LARK_ENV_FILE="D:\找工作\feishu_cua_agent\backend\.env.real"
-python cli.py run-case cases\smoke_search_only.yaml
-```
-
-建议不要把 `.env` 提交到仓库，只提交 `.env.example`。
-
-## 截图诊断
-
-真实桌面操作前，建议先确认 MSS 能抓到正常屏幕，而不是黑屏或纯色图：
-
-```powershell
-$env:CUA_LARK_MODEL_PROVIDER="mock"
-$env:DRY_RUN="true"
-python cli.py screenshot-diagnostics
-```
-
-输出会包含：
-
-- 当前可用 monitors 信息。
-- 每个显示器的诊断截图路径。
-- 每张截图的亮度均值、方差、是否疑似黑屏或纯色。
-- 可能原因，例如远程桌面、锁屏、权限、抓错显示器、显示器编号错误等。
-
-诊断截图会保存到：
-
-```text
-runs/diagnostics/screenshot_YYYYMMDD_HHMMSS_xxxxxxxx/
-```
-
-只检查配置中的显示器编号：
-
-```powershell
-$env:CUA_LARK_MONITOR_INDEX="1"
-python cli.py screenshot-diagnostics --configured-only
-```
-
-输出完整 JSON：
-
-```powershell
-python cli.py screenshot-diagnostics --json
-```
-
-## 坐标校准和屏幕调试
-
-如果要判断点击坐标是否合理，可以生成一张带网格和当前鼠标位置的截图：
-
-```powershell
-python cli.py inspect-screen
-```
-
-可以调整网格间距：
-
-```powershell
-python cli.py inspect-screen --grid-size 80
-```
-
-输出会包含：
-
-- 当前 `CUA_LARK_MONITOR_INDEX`
-- 截图宽高
-- 当前鼠标位置
-- 带坐标网格的截图路径
-
-## Mock 本地验证
-
-如果只是做本地确定性验证，不希望真实操作飞书桌面客户端，可以使用 `mock + dry_run`：
-
-```powershell
-$env:CUA_LARK_MODEL_PROVIDER="mock"
-$env:DRY_RUN="true"
-$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="true"
-python cli.py run-case cases\im_send_message.yaml
-```
-
-预期会看到类似输出：
-
-```text
-Run pass: 7/7 steps passed. Product=im. Evidence complete=True.
-report_dir=runs\reports\run_YYYYMMDD_HHMMSS_xxxxxxxx
-summary_json=runs\reports\run_YYYYMMDD_HHMMSS_xxxxxxxx\summary.json
-summary_md=runs\reports\run_YYYYMMDD_HHMMSS_xxxxxxxx\summary.md
-```
-
-如果当前机器截图是黑屏或纯色，`Evidence complete` 会显示为 `False`，报告的 `Warnings` 会说明截图异常原因。
-
-## 逐步执行模式
-
-CLI 支持 action preview / step-by-step 模式。开启后，每一步真正执行前都会打印：
-
-- action
-- target
-- input text
-- hotkeys
-- 候选点击坐标
-- bbox
-- before screenshot 路径
-
-然后等待人工输入：
-
-- `y`：继续执行当前步骤。
-- `n`：跳过当前步骤。
-- `q`：终止运行并生成 `aborted` 报告。
-
-通过 CLI 参数开启：
-
-```powershell
-python cli.py run-case cases\smoke_search_only.yaml --step-by-step
-```
-
-或通过环境变量开启：
-
-```powershell
-$env:CUA_LARK_STEP_BY_STEP="true"
-python cli.py run-case cases\smoke_search_only.yaml
-```
-
-报告中的 `steps.jsonl`、`summary.json` 和 `summary.md` 会记录每一步是否经过用户确认、实际坐标、输入文本、热键、dry_run 状态、验证结果和失败原因。
-
-注意：`mock` 或 `dry_run` 模式只说明流程和报告链路通过，不代表真实飞书操作成功。报告中的 `Runtime Mode` 和 `Warnings` 会明确标注这一点。
-
-## 启动 API 服务
-
-Windows 上推荐下面两种方式，避免直接运行 `uvicorn.exe` 时被 Windows 智能应用控制拦截。
-
-方式一：
-
-```powershell
-conda activate agent
-cd D:\找工作\feishu_cua_agent\backend
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
-方式二：
-
-```powershell
-conda activate agent
-cd D:\找工作\feishu_cua_agent\backend
-python start_api.py
-```
-
-启动后访问：
-
-```text
-http://127.0.0.1:8000/docs
-```
-
-## API 接口
-
-- `GET /health`：查看服务健康状态和当前运行模式。
-- `POST /runs`：运行一条自然语言测试任务。
-- `POST /run`：兼容旧接口，行为等同于 `/runs`。
-- `POST /run-case`：运行 YAML 测试用例。
-- `POST /plan`：只生成结构化计划，不执行操作。
-- `POST /observe`：截图并返回当前屏幕观察摘要。
-- `GET /diagnostics/screenshot`：执行截图诊断。
-- `GET /runs/{run_id}`：读取已经落盘的运行报告。
-
-## API 自检示例
-
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/health"
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/observe" -Method Post
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/diagnostics/screenshot"
-```
-
-## 真实模型 smoke 调试流程
-
-`.env` 可以放真实模型配置，但不要提交 `.env`，也不要把 API Key 或 Authorization header 写入日志、报告或 README。程序启动时会自动读取 `backend\.env`，PowerShell 中临时设置的环境变量优先级更高。
-
-推荐按下面顺序调试真实桌面链路：
-
-```powershell
-conda activate agent
-cd D:\找工作\feishu_cua_agent\backend
-
 python cli.py screenshot-diagnostics --configured-only
 python cli.py inspect-screen
-
-$env:DRY_RUN="false"
-$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
-python cli.py run-case cases\smoke_search_only.yaml --step-by-step
 ```
 
-`smoke_search_only.yaml` 是安全 smoke 用例，只验证飞书窗口、搜索框聚焦、输入 `harmless-smoke-test` 和截图证据；它不会发送消息，不会点击聊天结果进入会话，也不会使用 Enter 发送聊天内容。当前实现会优先使用 `Ctrl+K` 聚焦搜索，并通过剪贴板粘贴文本，降低中文输入法导致的不稳定。
-
-step-by-step 提示中会额外显示：
-
-- `locator_source`：定位来源，例如 `vlm`、`ocr`、`mock`、`manual`。
-- `confidence`：定位置信度。
-- `bbox_area_ratio`：候选框占屏幕面积比例。
-- `warnings`：候选框过大、中心点不在预期区域等风险。
-- `recommended_action`：建议继续、跳过、终止或手动坐标。
-- `active_window_title`：执行前的当前前台窗口标题，用来确认快捷键是否会打到飞书窗口。
-
-交互输入支持：
-
-- `y`：按当前候选继续执行。
-- `n`：跳过当前步骤。
-- `q`：终止运行并生成 `status=aborted` 报告。
-- `c x y`：使用手动坐标执行本步骤，例如 `c 120 300`。报告会记录 `manual_override=true` 和实际执行坐标。
-
-如果不想每一步都手动输入 `y`，推荐使用自动调试模式。它会打印每一步的 action preview，然后自动执行；如果定位 warning、窗口聚焦失败、动作失败或真实 VLM 验证失败，会自动中断并生成失败报告：
+再运行安全 IM smoke，不发送消息：
 
 ```powershell
 $env:DRY_RUN="false"
@@ -273,50 +44,161 @@ $env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
 python cli.py run-case cases\smoke_search_only.yaml --auto-debug
 ```
 
-`--step-by-step` 只建议在需要人工坐标覆盖 `c x y` 时使用；常规 smoke 调试请优先使用 `--auto-debug`。
-
-`smoke_search_only.yaml` 走本地快速验证路径：不会每一步都调用 VLM，因此不会因为模型 JSON 解析失败而卡住，也会明显更快。它通过截图健康、窗口标题、搜索弹窗区域变化、输入框区域变化等本地证据判断 smoke 是否通过。复杂任务仍会使用真实 VLM。
-
-安全保护：当 `DRY_RUN=false` 但 `effective_model_provider=mock` 时，系统默认禁止真实点击，避免模型配置失败回退到 mock 后还继续操作桌面。只有在你明确知道风险时，才设置：
+然后运行双产品安全 suite：
 
 ```powershell
-$env:CUA_LARK_ALLOW_MOCK_REAL_EXECUTION="true"
+python cli.py run-suite cases\safe_smoke_suite.yaml --auto-debug
 ```
 
-只有当截图诊断健康、`inspect-screen` 坐标合理、`smoke_search_only.yaml --step-by-step` 的截图/坐标/输入证据都稳定后，才进入 `im_send_message.yaml` 的完整 IM 发消息测试。完整发消息测试请先使用测试群和无害文本，不要在重要聊天窗口里测试。
-
-真实执行时，如果真实 VLM 验证失败并回退到 mock，系统会把该步骤标为失败，而不是继续给出 pass。这样可以避免“动作没成功，但 mock verification 让报告变绿”的误判。
-
-如果截图突然变黑，先看 `screenshot-diagnostics` 的原始 MSS 结果。如果所有 monitor 都是 `mean=0.0, stdev=0.0`，通常说明当前 Windows 桌面会话不可捕获，例如远程桌面被最小化、锁屏、权限/安全软件阻止或 GPU/驱动返回保护帧。普通运行链路会自动尝试其它 monitor 和备用截图方式；如果仍失败，会明确写入 `Screenshot warning`，并在允许 placeholder 的 dry-run 场景下生成占位截图，不再把黑屏当作正常 evidence。
-
-相关开关：
+最后才考虑受保护的真实 IM 发送。必须使用测试群或测试联系人：
 
 ```powershell
-$env:CUA_LARK_AUTO_SELECT_HEALTHY_MONITOR="true"
-$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"  # 真实运行建议关闭
+$env:CUA_LARK_ALLOW_SEND_MESSAGE="true"
+$env:CUA_LARK_ALLOWED_IM_TARGET="测试群"  # 可选：设置后只允许发给这个目标
+python cli.py run-case cases\im_send_message_guarded.yaml --auto-debug
 ```
 
-运行自然语言任务：
+如果没有显式开启 `CUA_LARK_ALLOW_SEND_MESSAGE=true`，系统会阻止真实发送。`CUA_LARK_ALLOWED_IM_TARGET` 是可选白名单：留空时使用自然语言解析出的目标；设置后目标必须完全匹配，适合固定测试群/测试联系人。
+
+## Docs / Calendar 创建闭环
+
+Docs 和 Calendar 都属于真实写操作，默认会被安全开关阻止。建议先 dry-run 看解析和步骤，再打开创建开关做真实测试。
+
+Docs dry-run：
 
 ```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/runs" `
-  -Method Post `
-  -ContentType "application/json" `
-  -Body '{"task":"在IM中搜索「测试群」，发送一条消息「Hello World」，并确认发送成功","product":"im"}'
+$env:DRY_RUN="true"
+python cli.py run --instruction "在飞书云文档中新建一个测试文档，标题为「CUA Docs 自动化测试」，正文为「hello docs」" --show-intent
+python cli.py run-case cases\docs_create_doc.yaml --auto-debug
 ```
 
-运行 YAML 用例：
+Docs 真实创建测试文档：
 
 ```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/run-case" `
-  -Method Post `
-  -ContentType "application/json" `
-  -Body '{"path":"cases\\im_send_message.yaml"}'
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+$env:CUA_LARK_ALLOW_DOC_CREATE="true"
+python cli.py run-case cases\docs_create_doc.yaml --auto-debug
 ```
+
+Calendar dry-run：
+
+```powershell
+$env:DRY_RUN="true"
+python cli.py run --instruction "打开飞书日历，创建一个会议，标题为「CUA Calendar 自动化测试」，时间为「明天 10:00」，参会人为「张三、李四」" --show-intent
+python cli.py run-case cases\calendar_create_event.yaml --auto-debug
+```
+
+Calendar 真实创建测试日程：
+
+```powershell
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+$env:CUA_LARK_ALLOW_CALENDAR_CREATE="true"
+python cli.py run-case cases\calendar_create_event.yaml --auto-debug
+```
+
+通过标准：报告 `Status=pass`；`Parsed Intent` 里能看到文档标题/正文或日程标题/时间/参会人；`Runtime Mode` 里对应创建开关为 `True`；步骤报告能看到打开产品、点击创建、输入内容、保存或验证；最终截图中应能看到目标标题和内容。不要在真实业务空间里做第一次测试。
+
+最近一次真实验证通过记录：
+
+- Docs：`runs\reports\run_20260425_220621_3f36cadb`，`Status=pass`。
+- Calendar：`runs\reports\run_20260425_234727_6d3a0cd2`，`Status=pass`。其中 `click_event_start_day` 使用 OCR 定位到 `(704, 986)`，最终 `verify_event` 由本地 OCR 确认 `title_hit=True, date_hit=True, time_hit=True`。
+
+## CLI 命令
+
+```powershell
+python cli.py run --instruction "在飞书 IM 中搜索测试群，不发送消息" --product im
+python cli.py run --instruction "给测试群发送一条消息：hello from CUA" --show-intent
+python cli.py run-case cases\smoke_search_only.yaml --auto-debug
+python cli.py run-suite cases\safe_smoke_suite.yaml --auto-debug
+python cli.py screenshot-diagnostics --configured-only
+python cli.py inspect-screen
+```
+
+如果省略 `--instruction`，CLI 会提示你在终端输入自然语言任务：
+
+```powershell
+python cli.py run --auto-debug
+```
+
+自然语言会先被解析成结构化意图，例如：
+
+- `im_search_only`：搜索 IM 目标，但不发送消息。
+- `im_send_message`：发送 IM 消息，会被路由到 guarded workflow。
+- `docs_open_smoke`：打开或观察云文档入口，不创建、不编辑文档。
+- `docs_create_doc`：创建测试文档，会被路由到 `docs_create_doc_guarded`，真实执行必须开启 `CUA_LARK_ALLOW_DOC_CREATE=true`。
+- `calendar_create_event`：创建测试日程，会被路由到 `calendar_create_event_guarded`，真实执行必须开启 `CUA_LARK_ALLOW_CALENDAR_CREATE=true`。
+
+可以只看解析结果、不执行桌面动作：
+
+```powershell
+python cli.py run --instruction "给测试群发送一条消息：hello from CUA" --show-intent
+```
+
+`--step-by-step` 会每一步等待人工确认；日常真实调试推荐 `--auto-debug`，它会自动执行，并在定位异常、窗口聚焦失败、动作失败或验证失败时停止。
+
+## API 服务
+
+Windows 上推荐以下两种启动方式，避免直接运行 `uvicorn.exe` 被系统拦截：
+
+```powershell
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+或：
+
+```powershell
+python start_api.py
+```
+
+常用接口：
+
+- `GET /health`
+- `POST /runs`
+- `POST /run-case`
+- `POST /plan`
+- `POST /observe`
+- `GET /diagnostics/screenshot`
+- `GET /runs/{run_id}`
+
+## 运行模式与安全保护
+
+- `DRY_RUN=true`：只验证流程和报告，不真实操作桌面。
+- `CUA_LARK_PLACEHOLDER_SCREENSHOT=true`：允许 dry-run 下生成占位截图。
+- `DRY_RUN=false`：真实桌面执行，运行前会做截图健康检查。
+- `CUA_LARK_ALLOW_UNHEALTHY_SCREENSHOT=false`：截图疑似黑屏或纯色时默认阻止真实执行。
+- `CUA_LARK_ALLOW_MOCK_REAL_EXECUTION=false`：真实执行时如果模型 provider 退回 mock，默认阻止点击。
+- `CUA_LARK_AUTO_DEBUG=true` 或 `--auto-debug`：自动调试执行，异常即停。
+- `CUA_LARK_ABORT_FILE=./runs/ABORT`：创建该文件可在下一步动作前中断运行。
+- `CUA_LARK_ALLOW_SEND_MESSAGE=true`：允许真实发送 IM 消息。
+- `CUA_LARK_ALLOW_DOC_CREATE=true`：允许真实创建测试云文档。
+- `CUA_LARK_ALLOW_CALENDAR_CREATE=true`：允许真实创建测试日程。
+
+## 当前示例用例
+
+- `cases\smoke_search_only.yaml`：IM 搜索框安全 smoke，不发送消息。
+- `cases\im_search_only.yaml`：IM 搜索目标安全用例，不进入会话，不发送消息。
+- `cases\docs_open_smoke.yaml`：云文档入口安全 smoke，不创建、不编辑文档。
+- `cases\safe_smoke_suite.yaml`：IM + Docs 安全 suite。
+- `cases\im_send_message_guarded.yaml`：受保护 IM 发送，仅允许测试目标。
+- `cases\docs_create_doc.yaml`：受保护 Docs 创建测试文档，需要 `CUA_LARK_ALLOW_DOC_CREATE=true` 才能真实创建。
+- `cases\calendar_create_event.yaml`：受保护 Calendar 创建测试日程，需要 `CUA_LARK_ALLOW_CALENDAR_CREATE=true` 才能真实保存。
+- `cases\im_send_message.yaml`：早期 IM 示例，建议优先使用 guarded 版本或自然语言 guarded flow。
+
+## 定位与验证策略
+
+真实桌面执行优先使用闭环定位，而不是固定坐标：
+
+- IM 搜索结果：VLM 先给候选区域，OCR 必须确认目标联系人/会话文字，点击安全行区域。
+- Docs 新建：进入云文档后 hover “新建”，OCR 点击“文档”，再点击“新建空白文档”的加号区域；浏览器文档编辑器打开后保持浏览器前台，不再强行切回飞书。
+- Calendar 日期：先确认日期选择器弹层标题，再识别 7 列日期网格，根据 `event_date` 计算目标日格中心。日期关键点击禁止退回 VLM 猜测，避免误点到相邻日期或月份。
+- 弹窗处理：使用 `conditional_hotkey` / `conditional_click`，只有视觉条件存在时才执行 Esc 或点击关闭。
+- Calendar 最终验证：本地 OCR 检查日程标题、目标日期和时间，减少 VLM 对周视图/月视图的误判。
 
 ## 报告输出
 
-每次运行都会生成独立目录：
+每次 case 运行会生成：
 
 ```text
 runs/reports/run_YYYYMMDD_HHMMSS_xxxxxxxx/
@@ -327,119 +209,102 @@ runs/reports/run_YYYYMMDD_HHMMSS_xxxxxxxx/
 `-- artifacts/
 ```
 
-报告会额外显示：
+suite 运行会生成：
 
-- `model_provider`
-- `effective_model_provider`
-- `dry_run`
-- `placeholder_screenshot`
-- `real_desktop_execution`
-- `mock_verification`
-- 截图诊断结果
-- 黑屏或纯色截图 warning
+```text
+runs/reports/suite_YYYYMMDD_HHMMSS_xxxxxxxx/
+|-- suite_summary.json
+`-- suite_summary.md
+```
 
-如果报告提示“这是模拟验证，不代表真实飞书桌面操作成功”，说明当前结果只能用于验证流程链路。
+报告会记录运行模式、真实/模拟状态、截图诊断、每一步 before/after 截图、坐标、输入、耗时、验证结果和失败原因。mock/dry_run 报告会明确提示模拟验证不代表真实飞书操作成功。
 
-## 真实飞书操作前检查
+自然语言运行的报告还会包含 `Parsed Intent`，用于确认 Agent 如何理解你的需求，例如目标会话、消息内容、`plan_template` 和是否需要安全保护。
 
-真实执行前建议按顺序完成：
+## 更多文档
 
+- `docs/system_design.md`
+- `docs/evaluation.md`
+- `docs/demo_script.md`
+- `ACCEPTANCE.md`
+
+## API 怎么理解和验证
+
+API 是把 CLI 能力包装成 HTTP 服务，方便前端页面或其他程序调用。它不是另一套 Agent 逻辑，底层仍然复用同一套截图、规划、执行、验证和报告链路。只在本机调试时，CLI 更简单；需要被网页或外部脚本调用时，再启动 API。
+
+启动服务：
 ```powershell
 conda activate agent
 cd D:\找工作\feishu_cua_agent\backend
-python cli.py screenshot-diagnostics
-python cli.py inspect-screen
+python start_api.py
 ```
 
-确认至少有一个显示器截图不是黑屏或纯色后，先运行安全 smoke 用例。这个用例只定位/输入搜索框，不发送聊天消息：
-
+或：
 ```powershell
-$env:CUA_LARK_MODEL_PROVIDER="auto"
-$env:OPENAI_API_KEY="replace_me"
-$env:OPENAI_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
-$env:OPENAI_MODEL_TEXT="qwen-plus"
-$env:OPENAI_MODEL_VISION="qwen-vl-max"
-$env:DRY_RUN="false"
-$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
-$env:CUA_LARK_MONITOR_INDEX="1"
-python cli.py run-case cases\smoke_search_only.yaml --step-by-step
-```
-
-当 `DRY_RUN=false` 时，系统会先执行截图健康检查。如果截图疑似黑屏或纯色，默认会阻止真实点击。只有明确设置下面变量才会强制继续：
-
-```powershell
-$env:CUA_LARK_ALLOW_UNHEALTHY_SCREENSHOT="true"
-```
-
-不建议在没有确认屏幕可见性的情况下强制继续。
-
-真实桌面调试推荐顺序：
-
-1. `python cli.py screenshot-diagnostics`
-2. `python cli.py inspect-screen`
-3. 启动 API 后调用 `/observe`，确认截图观察链路可用。
-4. `DRY_RUN=false` + `--step-by-step` 运行 `cases\smoke_search_only.yaml`。
-5. 确认报告里真实坐标、输入文本、截图证据都合理。
-6. 最后再运行 `cases\im_send_message.yaml`。
-
-请不要在重要聊天窗口里测试。完整发送消息前，先使用测试群和无害文本。
-
-## 安全中断
-
-真实执行过程中可以通过两种方式中断：
-
-- 在 CLI 中按 `Ctrl+C`，系统会尽量生成 `status=aborted` 的报告。
-- 创建 `runs\ABORT` 文件，系统会在下一步动作前停止。
-
-PowerShell 示例：
-
-```powershell
-New-Item -ItemType File runs\ABORT
-```
-
-清除中断文件：
-
-```powershell
-Remove-Item runs\ABORT
-```
-
-## 示例用例
-
-当前提供三个 YAML 示例：
-
-- `cases\im_send_message.yaml`：IM 搜索群聊并发送消息。
-- `cases\docs_create_doc.yaml`：创建云文档并输入标题。
-- `cases\calendar_create_event.yaml`：创建日历会议。
-- `cases\smoke_search_only.yaml`：安全真实桌面 smoke，不发送消息。
-
-运行方式：
-
-```powershell
-python cli.py run-case cases\im_send_message.yaml
-python cli.py run-case cases\docs_create_doc.yaml
-python cli.py run-case cases\calendar_create_event.yaml
-python cli.py run-case cases\smoke_search_only.yaml
-```
-
-## 最小自检清单
-
-```powershell
-conda activate agent
-cd D:\找工作\feishu_cua_agent\backend
-$env:CUA_LARK_MODEL_PROVIDER="mock"
-$env:DRY_RUN="true"
-$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="true"
-
-python cli.py screenshot-diagnostics
-python cli.py inspect-screen
-python cli.py run-case cases\im_send_message.yaml
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-服务启动后另开一个 PowerShell：
-
+最小验收：
 ```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/health"
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/observe" -Method Post
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/diagnostics/screenshot"
+curl http://127.0.0.1:8000/health
 ```
+
+返回 JSON 里 `status=ok` 就说明服务启动正常。
+
+安全查看计划，不执行桌面动作：
+```powershell
+$body = @{
+  task = "在IM中搜索测试群，发送一条消息：hello from CUA"
+  product = "im"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8000/plan `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+安全 dry-run 运行自然语言任务：
+```powershell
+$body = @{
+  task = "在IM中搜索测试群，发送一条消息：hello from CUA"
+  product = "im"
+  dry_run = $true
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8000/runs `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+运行 YAML 用例：
+```powershell
+$body = @{
+  path = "cases\smoke_search_only.yaml"
+  dry_run = $true
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8000/run-case `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+截图诊断：
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/diagnostics/screenshot
+```
+
+查询报告：
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/runs/<run_id>
+```
+
+API 算没问题的标准：
+- `python start_api.py` 能启动。
+- `/health` 返回 200 和 `status=ok`。
+- `/plan` 能返回结构化步骤，且不会点击桌面。
+- `/diagnostics/screenshot` 能返回截图诊断结果。
+- `/runs` 和 `/run-case` 在 `dry_run=true` 时能生成报告但不真实操作桌面。
+- `dry_run=false` 时，截图健康检查、mock 真实执行保护、发送安全开关仍然生效。

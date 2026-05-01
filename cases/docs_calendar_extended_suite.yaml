@@ -1,0 +1,11 @@
+id: docs_calendar_extended_suite
+name: Docs and Calendar extended dry-run suite
+description: "Covers Docs create/rich-edit/share and Calendar create/invite/modify/busy-free workflows in dry-run or explicitly guarded modes."
+cases:
+  - path: docs_create_doc.yaml
+  - path: docs_rich_edit_guarded.yaml
+  - path: docs_share_doc_guarded.yaml
+  - path: calendar_create_event.yaml
+  - path: calendar_invite_attendee_guarded.yaml
+  - path: calendar_modify_event_time_guarded.yaml
+  - path: calendar_view_busy_free_guarded.yaml

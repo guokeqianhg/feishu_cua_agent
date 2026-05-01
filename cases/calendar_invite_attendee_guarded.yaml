@@ -1,0 +1,19 @@
+id: calendar_invite_attendee_guarded_001
+name: Guarded Calendar invite attendee
+product: calendar
+instruction: "打开飞书日历，创建一个测试日程，标题为「CUA Calendar 邀请测试」，时间为「明天 10:00」，邀请参会人「李新元」。"
+preconditions:
+  - The current account can create Calendar events and invite attendees.
+expected_result: "A guarded test calendar event is created with the requested attendee when invite guard is enabled."
+tags:
+  - calendar
+  - invite
+  - guarded
+timeout_seconds: 420
+metadata:
+  plan_template: calendar_invite_attendee_guarded
+  safety_guard_required: true
+  event_title: "CUA Calendar 邀请测试"
+  event_time: "明天 10:00"
+  attendees:
+    - "李新元"

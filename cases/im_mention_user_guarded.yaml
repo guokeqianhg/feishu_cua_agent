@@ -1,0 +1,20 @@
+id: im_mention_user_guarded_001
+name: 飞书 IM 受保护 @ 提及成员
+product: im
+instruction: "在测试群中 @ 提及李新元，并发送 hello from CUA。"
+preconditions:
+  - 飞书桌面客户端已打开并登录。
+  - 测试群中可以搜索或提及李新元。
+  - 真实发送前必须设置 CUA_LARK_ALLOW_SEND_MESSAGE=true。
+expected_result: "消息中包含对李新元的 @ 提及，并只发送到指定测试会话。"
+tags:
+  - im
+  - guarded
+  - mention
+  - e2e
+timeout_seconds: 300
+metadata:
+  plan_template: im_mention_user_guarded
+  target: "测试群"
+  mention_user: "李新元"
+  message: "@李新元 hello from CUA"

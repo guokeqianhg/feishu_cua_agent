@@ -23,7 +23,11 @@ def _target_kind(step: PlanStep) -> str:
         return explicit_kind
     text = f"{step.id} {step.target_description or ''}".lower()
     strategy = str(step.metadata.get("locator_strategy") or "").lower()
+    if step.action == "scroll":
+        return "generic"
     if step.action == "type_text" or strategy in {"search_dialog_input", "message_input"}:
+        return "text_input"
+    if step.action == "paste_image":
         return "text_input"
     if step.id in {"type_query", "type_safe_query", "type_message"}:
         return "text_input"
@@ -104,7 +108,7 @@ def _dry_run_simulated_target(state: AgentState, step: PlanStep) -> LocatedTarge
         return None
     if not _needs_visual_location(step):
         return None
-    if not step.metadata.get("force_vlm_locator"):
+    if not (step.metadata.get("force_vlm_locator") or step.metadata.get("dry_run_simulated_target")):
         return None
     return LocatedTarget(
         step_id=step.id,
@@ -149,7 +153,8 @@ def _add_locator_safety(step: PlanStep, observation: Observation, located: Locat
         warnings.append(f"bbox_area_ratio={area_ratio:.4f} is too large for a text input.")
     if kind == "search_box" and area_ratio > 0.20:
         warnings.append(f"bbox_area_ratio={area_ratio:.4f} is too large for a search box.")
-    if kind == "message_entry" and center[0] > width * 0.30:
+    strategy = str(step.metadata.get("locator_strategy") or "").lower()
+    if kind == "message_entry" and strategy != "im_message_row_by_text" and center[0] > width * 0.30:
         warnings.append("candidate_center is not in the expected left navigation area for the message entry.")
     if kind == "search_box" and center[1] > height * 0.45:
         warnings.append("candidate_center is lower than expected for a search box/global search control.")
@@ -181,12 +186,12 @@ def _maybe_correct_scaled_vlm_target(observation: Observation, located: LocatedT
     window = detect_lark_window(observation.screenshot_path)
     if window is None or _point_in_window(located.center, window):
         return located
-    
+
     # 自适应检测缩放比例：尝试常见的缩放因子 1.5x, 2x, 2.5x, 3x
     scale_factors = [1.25, 1.5, 1.75, 2.0, 2.5, 3.0]
     best_scale = None
     best_scaled_center = None
-    
+
     for scale in scale_factors:
         scaled_center = (
             round(located.center[0] * scale),
@@ -196,7 +201,7 @@ def _maybe_correct_scaled_vlm_target(observation: Observation, located: LocatedT
             best_scale = scale
             best_scaled_center = scaled_center
             break
-    
+
     if best_scale is None or best_scaled_center is None:
         return located
 
@@ -208,7 +213,7 @@ def _maybe_correct_scaled_vlm_target(observation: Observation, located: LocatedT
             x2=round(located.bbox.x2 * best_scale),
             y2=round(located.bbox.y2 * best_scale),
         )
-    
+
     located.metadata["coordinate_scale_correction"] = {
         "factor": best_scale,
         "original_center": located.center,
@@ -226,6 +231,17 @@ def _safe_click_in_text_row(text_bbox: BoundingBox, row_bbox: BoundingBox) -> tu
     row_left_pad = max(16, min(52, (row_bbox.x2 - row_bbox.x1) // 8))
     x = max(row_bbox.x1 + row_left_pad, min(text_cx, row_bbox.x2 - 16))
     y = max(row_bbox.y1 + 8, min(text_cy, row_bbox.y2 - 8))
+    return (x, y)
+
+
+def _safe_click_in_search_result_row(text_bbox: BoundingBox, row_bbox: BoundingBox) -> tuple[int, int]:
+    """Click the left text area of a search result, away from right-side snippets/actions."""
+    _text_cx, text_cy = text_bbox.center()
+    row_width = max(row_bbox.x2 - row_bbox.x1, 1)
+    left_safe = row_bbox.x1 + max(34, min(84, row_width // 10))
+    right_limit = row_bbox.x1 + min(row_width - 24, max(160, row_width // 3))
+    x = max(row_bbox.x1 + 16, min(left_safe, right_limit))
+    y = max(row_bbox.y1 + 10, min(text_cy, row_bbox.y2 - 10))
     return (x, y)
 
 
@@ -264,7 +280,7 @@ def _find_exact_ocr_target_row(image_path: str, target_text: str, roi: BoundingB
         x2=min(roi.x2, roi.x2 - 28),
         y2=min(roi.y2, match_bbox.y2 + 28),
     )
-    center = _safe_click_in_text_row(match_bbox, row_bbox)
+    center = _safe_click_in_search_result_row(match_bbox, row_bbox)
     return LocatedTarget(
         step_id="open_chat",
         target_description=target_text,
@@ -347,8 +363,10 @@ def _needs_visual_location(step: PlanStep) -> bool:
         "double_click",
         "right_click",
         "drag",
+        "scroll",
         "hover",
         "type_text",
+        "paste_image",
         "conditional_hotkey",
     )
 
@@ -365,27 +383,40 @@ def _use_real_vlm_locator(state: AgentState, step: PlanStep) -> bool:
 
 
 def _locate_open_chat(state: AgentState, step: PlanStep) -> LocatedTarget:
+    deterministic = locate_lark_target(state.before_observation, step)
+    if deterministic is not None and (
+        deterministic.recommended_action != "continue"
+        or deterministic.confidence >= 0.85
+        or deterministic.source in {"ocr", "hybrid"}
+    ):
+        return deterministic
+
     semantic = vlm.locate_element(state.before_observation, step)
     if semantic.warnings or semantic.recommended_action != "continue" or semantic.confidence < 0.45:
         return semantic
     semantic = _maybe_correct_scaled_vlm_target(state.before_observation, semantic)
-    
+
     # 提取搜索目标文本（去掉前缀，只保留要搜索的名称）
-    target_text = step.metadata.get("target", "")
+    if step.id == "select_mention_candidate":
+        target_text = step.metadata.get("mention_user", "") or step.metadata.get("target", "")
+    elif step.id == "select_group_member":
+        target_text = step.metadata.get("member", "") or step.metadata.get("target", "")
+    else:
+        target_text = step.metadata.get("target", "") or step.metadata.get("member") or step.metadata.get("mention_user", "")
     if not target_text:
         # 从target_description中提取目标名称
         if "for " in step.target_description:
             target_text = step.target_description.split("for ")[-1].strip()
-    
+
     screenshot_path = state.before_observation.screenshot_path
-    cv_candidate = locate_lark_target(state.before_observation, step)
+    cv_candidate = deterministic or locate_lark_target(state.before_observation, step)
     size = _screen_size(state.before_observation)
     broad_roi = None
     if size:
         width, height = size
         broad_roi = BoundingBox(
             x1=max(0, round(width * 0.18)),
-            y1=max(0, round(height * 0.36)),
+            y1=max(0, round(height * 0.44)),
             x2=min(width, round(width * 0.62)),
             y2=min(height, round(height * 0.78)),
         )
@@ -416,7 +447,7 @@ def _locate_open_chat(state: AgentState, step: PlanStep) -> LocatedTarget:
         )
         if located is not None:
             return located
-    
+
     # 第二层：布局候选区 OCR 校验。只有目标文字在候选区出现才允许点击。
     if cv_candidate and cv_candidate.bbox and target_text:
         located = _ocr_confirmed_target(
@@ -467,7 +498,7 @@ def locate_node(state: AgentState) -> AgentState:
         located = explicit
     elif dry_run_target is not None:
         located = dry_run_target
-    elif state.runtime and state.runtime.real_desktop_execution and step.id == "open_chat":
+    elif state.runtime and state.runtime.real_desktop_execution and step.id in {"open_chat", "select_group_member", "select_mention_candidate"}:
         located = _locate_open_chat(state, step)
     elif step.action in {"conditional_click", "conditional_hotkey"}:
         located = locate_lark_target(state.before_observation, step) or LocatedTarget(

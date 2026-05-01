@@ -8,6 +8,9 @@ from core.schemas import ActionResult, LocatedTarget, PlanStep
 from storage.run_logger import RunLogger
 from tools.desktop.executor import ActionExecutor
 from tools.desktop.window_manager import WindowManager
+from tools.vision.docs_error_library import analyze_docs_screen
+from tools.vision.im_error_library import analyze_im_screen
+from tools.vision.vc_error_library import analyze_vc_screen
 
 
 logger = RunLogger()
@@ -159,12 +162,35 @@ def _mutation_policy_precheck(state: AgentState, step: PlanStep) -> ActionResult
     if state.dry_run:
         return None
     if step.metadata.get("requires_doc_create_guard"):
+        docs_error = _docs_state_precheck(state, step)
+        if docs_error is not None:
+            return docs_error
         if settings.allow_doc_create:
             return None
         message = (
             f"Guarded Docs create workflow blocked step {step.id}: "
             "CUA_LARK_ALLOW_DOC_CREATE is not true."
         )
+        return ActionResult(
+            success=False,
+            message=message,
+            action=step.action,
+            dry_run=bool(state.dry_run),
+            coordinates=state.last_located_target.center if state.last_located_target else None,
+            input_text=step.input_text,
+            hotkeys=step.hotkeys,
+            error_message=message,
+        )
+    if step.metadata.get("requires_doc_share_guard") or step.metadata.get("dangerous_doc_share"):
+        docs_error = _docs_state_precheck(state, step)
+        if docs_error is not None:
+            return docs_error
+        if settings.allow_doc_share and _doc_share_recipient_allowed(step):
+            return None
+        reasons = _doc_share_recipient_block_reasons(step)
+        if not settings.allow_doc_share:
+            reasons.insert(0, "CUA_LARK_ALLOW_DOC_SHARE is not true")
+        message = f"Guarded Docs share workflow blocked step {step.id}: " + "; ".join(reasons)
         return ActionResult(
             success=False,
             message=message,
@@ -192,15 +218,157 @@ def _mutation_policy_precheck(state: AgentState, step: PlanStep) -> ActionResult
             hotkeys=step.hotkeys,
             error_message=message,
         )
+    if step.metadata.get("requires_calendar_invite_guard"):
+        if settings.allow_calendar_invite:
+            return None
+        message = (
+            f"Guarded Calendar invite workflow blocked step {step.id}: "
+            "CUA_LARK_ALLOW_CALENDAR_INVITE is not true."
+        )
+        return ActionResult(
+            success=False,
+            message=message,
+            action=step.action,
+            dry_run=bool(state.dry_run),
+            coordinates=state.last_located_target.center if state.last_located_target else None,
+            input_text=step.input_text,
+            hotkeys=step.hotkeys,
+            error_message=message,
+        )
+    if step.metadata.get("requires_calendar_modify_guard") or step.metadata.get("dangerous_calendar_modify"):
+        if settings.allow_calendar_modify:
+            return None
+        message = (
+            f"Guarded Calendar modify workflow blocked step {step.id}: "
+            "CUA_LARK_ALLOW_CALENDAR_MODIFY is not true."
+        )
+        return ActionResult(
+            success=False,
+            message=message,
+            action=step.action,
+            dry_run=bool(state.dry_run),
+            coordinates=state.last_located_target.center if state.last_located_target else None,
+            input_text=step.input_text,
+            hotkeys=step.hotkeys,
+            error_message=message,
+        )
+    if step.metadata.get("requires_vc_start_guard") or step.metadata.get("dangerous_vc_start"):
+        vc_error = _vc_state_precheck(state, step)
+        if vc_error is not None:
+            return vc_error
+        if settings.allow_vc_start:
+            return None
+        message = f"Guarded VC start workflow blocked step {step.id}: CUA_LARK_ALLOW_VC_START is not true."
+        return ActionResult(
+            success=False,
+            message=message,
+            action=step.action,
+            dry_run=bool(state.dry_run),
+            coordinates=state.last_located_target.center if state.last_located_target else None,
+            input_text=step.input_text,
+            hotkeys=step.hotkeys,
+            error_message=message,
+        )
+    if step.metadata.get("requires_vc_join_guard") or step.metadata.get("dangerous_vc_join"):
+        vc_error = _vc_state_precheck(state, step)
+        if vc_error is not None:
+            return vc_error
+        if settings.allow_vc_join:
+            return None
+        message = f"Guarded VC join workflow blocked step {step.id}: CUA_LARK_ALLOW_VC_JOIN is not true."
+        return ActionResult(
+            success=False,
+            message=message,
+            action=step.action,
+            dry_run=bool(state.dry_run),
+            coordinates=state.last_located_target.center if state.last_located_target else None,
+            input_text=step.input_text,
+            hotkeys=step.hotkeys,
+            error_message=message,
+        )
+    if step.metadata.get("requires_vc_device_toggle_guard") or step.metadata.get("dangerous_vc_device_toggle"):
+        vc_error = _vc_state_precheck(state, step)
+        if vc_error is not None:
+            return vc_error
+        if settings.allow_vc_device_toggle:
+            return None
+        message = f"Guarded VC device workflow blocked step {step.id}: CUA_LARK_ALLOW_VC_DEVICE_TOGGLE is not true."
+        return ActionResult(
+            success=False,
+            message=message,
+            action=step.action,
+            dry_run=bool(state.dry_run),
+            coordinates=state.last_located_target.center if state.last_located_target else None,
+            input_text=step.input_text,
+            hotkeys=step.hotkeys,
+            error_message=message,
+        )
+    if step.metadata.get("requires_image_send_guard") or step.metadata.get("dangerous_image_send"):
+        chat_error = _im_current_chat_precheck(state, step)
+        if chat_error is not None:
+            return chat_error
+        if settings.allow_send_image and _im_target_allowed(step):
+            return None
+        reasons = _im_target_block_reasons(step)
+        if not settings.allow_send_image:
+            reasons.insert(0, "CUA_LARK_ALLOW_SEND_IMAGE is not true")
+        message = f"Guarded IM image workflow blocked step {step.id}: " + "; ".join(reasons)
+        return ActionResult(
+            success=False,
+            message=message,
+            action=step.action,
+            dry_run=bool(state.dry_run),
+            coordinates=state.last_located_target.center if state.last_located_target else None,
+            input_text=step.input_text,
+            hotkeys=step.hotkeys,
+            error_message=message,
+        )
+    if step.metadata.get("requires_group_create_guard") or step.metadata.get("dangerous_group_create"):
+        member_reasons = _group_member_block_reasons(step)
+        if settings.allow_create_group and not member_reasons:
+            return None
+        reasons = member_reasons
+        if not settings.allow_create_group:
+            reasons.insert(0, "CUA_LARK_ALLOW_CREATE_GROUP is not true")
+        message = f"Guarded IM group-create workflow blocked step {step.id}: " + "; ".join(reasons)
+        return ActionResult(
+            success=False,
+            message=message,
+            action=step.action,
+            dry_run=bool(state.dry_run),
+            coordinates=state.last_located_target.center if state.last_located_target else None,
+            input_text=step.input_text,
+            hotkeys=step.hotkeys,
+            error_message=message,
+        )
+    if step.metadata.get("requires_emoji_reaction_guard") or step.metadata.get("dangerous_emoji_reaction"):
+        chat_error = _im_current_chat_precheck(state, step)
+        if chat_error is not None:
+            return chat_error
+        if settings.allow_emoji_reaction and _im_target_allowed(step):
+            return None
+        reasons = _im_target_block_reasons(step)
+        if not settings.allow_emoji_reaction:
+            reasons.insert(0, "CUA_LARK_ALLOW_EMOJI_REACTION is not true")
+        message = f"Guarded IM emoji workflow blocked step {step.id}: " + "; ".join(reasons)
+        return ActionResult(
+            success=False,
+            message=message,
+            action=step.action,
+            dry_run=bool(state.dry_run),
+            coordinates=state.last_located_target.center if state.last_located_target else None,
+            input_text=step.input_text,
+            hotkeys=step.hotkeys,
+            error_message=message,
+        )
     if not step.metadata.get("requires_send_guard") and not step.metadata.get("dangerous_send"):
         return None
-    target = str(step.metadata.get("target") or "")
-    allowed_target = settings.allowed_im_target.strip()
-    reasons: list[str] = []
+    chat_error = _im_current_chat_precheck(state, step)
+    if chat_error is not None:
+        return chat_error
+    reasons = _im_target_block_reasons(step)
     if not settings.allow_send_message:
-        reasons.append("CUA_LARK_ALLOW_SEND_MESSAGE is not true")
-    if allowed_target and target and target != allowed_target:
-        reasons.append(f"case target {target!r} does not match CUA_LARK_ALLOWED_IM_TARGET")
+        reasons.insert(0, "CUA_LARK_ALLOW_SEND_MESSAGE is not true")
     if not reasons:
         return None
     message = (
@@ -220,13 +388,167 @@ def _mutation_policy_precheck(state: AgentState, step: PlanStep) -> ActionResult
     )
 
 
+def _im_target_allowed(step: PlanStep) -> bool:
+    return not _im_target_block_reasons(step)
+
+
+def _doc_share_recipient_allowed(step: PlanStep) -> bool:
+    return not _doc_share_recipient_block_reasons(step)
+
+
+def _doc_share_recipient_block_reasons(step: PlanStep) -> list[str]:
+    recipient = str(step.metadata.get("share_recipient") or "")
+    allowed = settings.allowed_doc_share_recipient.strip()
+    if allowed and recipient and recipient != allowed:
+        return [f"share recipient {recipient!r} does not match CUA_LARK_ALLOWED_DOC_SHARE_RECIPIENT"]
+    return []
+
+
+def _im_target_block_reasons(step: PlanStep) -> list[str]:
+    target = str(step.metadata.get("target") or "")
+    allowed_target = settings.allowed_im_target.strip()
+    if allowed_target and target and target != allowed_target:
+        return [f"case target {target!r} does not match CUA_LARK_ALLOWED_IM_TARGET"]
+    return []
+
+
+def _group_member_block_reasons(step: PlanStep) -> list[str]:
+    allowed = settings.allowed_group_member.strip()
+    if not allowed:
+        return []
+    raw_members = step.metadata.get("group_members") or step.metadata.get("members") or []
+    if isinstance(raw_members, str):
+        members = [raw_members]
+    else:
+        members = [str(item) for item in raw_members]
+    blocked = [member for member in members if member and member != allowed]
+    if blocked:
+        return [f"group members {blocked!r} do not match CUA_LARK_ALLOWED_GROUP_MEMBER"]
+    return []
+
+
+def _im_current_chat_precheck(state: AgentState, step: PlanStep) -> ActionResult | None:
+    if step.metadata.get("guard_phase") == "open_chat":
+        return None
+    if step.id in {"open_im", "focus_search", "type_query", "type_safe_query", "type_history_query"}:
+        return None
+    target = str(step.metadata.get("target") or "").strip()
+    if not target:
+        return None
+    analysis = analyze_im_screen(state.before_observation, target)
+    if analysis is None:
+        return None
+    if analysis.is_target_chat:
+        return None
+    if analysis.reference_match:
+        reason = f"known IM error reference matched: {analysis.reference_match} ({analysis.reference_similarity:.2f})"
+    elif analysis.wrong_state:
+        reason = f"wrong IM state detected: {analysis.wrong_state}"
+    else:
+        reason = f"target chat {target!r} is not visible before guarded IM action"
+    message = (
+        f"Guarded IM workflow blocked step {step.id}: {reason}. "
+        "Reopen the allowed target chat before drafting, sending, image upload, mention, or reaction."
+    )
+    return ActionResult(
+        success=False,
+        message=message,
+        action=step.action,
+        dry_run=bool(state.dry_run),
+        coordinates=state.last_located_target.center if state.last_located_target else None,
+        input_text=step.input_text,
+        hotkeys=step.hotkeys,
+        error_message=message,
+    )
+
+
+def _docs_state_precheck(state: AgentState, step: PlanStep) -> ActionResult | None:
+    if step.id in {
+        "click_create_doc",
+        "click_blank_doc",
+        "click_blank_doc_card",
+        "focus_docs_editor_window",
+        "wait_doc_editor",
+        "type_doc_title",
+        "move_to_doc_body",
+        "type_doc_body",
+    }:
+        return None
+    analysis = analyze_docs_screen(
+        state.before_observation,
+        expected_recipient=str(step.metadata.get("share_recipient") or ""),
+        expected_title=str(step.metadata.get("doc_title") or ""),
+        expected_body=str(step.metadata.get("doc_body") or ""),
+    )
+    if analysis is None or analysis.wrong_state is None:
+        return None
+    if analysis.wrong_state == "share_target_not_confirmed" and step.id not in {
+        "select_doc_share_recipient",
+        "add_doc_share_recipient",
+        "confirm_doc_share",
+    }:
+        return None
+    message = (
+        f"Guarded Docs workflow blocked step {step.id}: "
+        f"wrong Docs state detected: {analysis.wrong_state}. "
+        "Recover or fail instead of continuing blind UI actions."
+    )
+    return ActionResult(
+        success=False,
+        message=message,
+        action=step.action,
+        dry_run=bool(state.dry_run),
+        coordinates=state.last_located_target.center if state.last_located_target else None,
+        input_text=step.input_text,
+        hotkeys=step.hotkeys,
+        error_message=message,
+    )
+
+
+def _vc_state_precheck(state: AgentState, step: PlanStep) -> ActionResult | None:
+    if step.id in {
+        "open_vc",
+        "wait_vc_screen",
+        "click_vc_start_meeting",
+        "click_vc_join_meeting",
+        "type_vc_meeting_id",
+        "allow_vc_permission",
+        "set_vc_camera_state",
+        "set_vc_mic_state",
+        "confirm_start_meeting",
+        "confirm_join_meeting",
+    }:
+        return None
+    analysis = analyze_vc_screen(state.before_observation)
+    if analysis is None or analysis.wrong_state is None:
+        return None
+    message = (
+        f"Guarded VC workflow blocked step {step.id}: wrong VC state detected: {analysis.wrong_state}. "
+        "Recover or fail instead of continuing blind UI actions."
+    )
+    return ActionResult(
+        success=False,
+        message=message,
+        action=step.action,
+        dry_run=bool(state.dry_run),
+        coordinates=state.last_located_target.center if state.last_located_target else None,
+        input_text=step.input_text,
+        hotkeys=step.hotkeys,
+        error_message=message,
+    )
+
+
 def _conditional_action_precheck(state: AgentState, step: PlanStep) -> ActionResult | None:
     if step.action not in {"conditional_click", "conditional_hotkey"}:
         return None
     target = state.last_located_target
     if target is not None and target.confidence > 0 and not target.warnings:
         return None
-    message = f"Conditional step {step.id} skipped because its visual condition is not present."
+    skip_reason = str((target.metadata if target else {}).get("skip_reason") or "").strip()
+    if skip_reason:
+        message = f"Conditional step {step.id} skipped: {skip_reason}. {target.reason if target else ''}".strip()
+    else:
+        message = f"Conditional step {step.id} skipped because its visual condition is not present."
     return ActionResult(
         success=True,
         message=message,
@@ -244,7 +566,10 @@ def _focus_before_execute(state: AgentState, step: PlanStep) -> ActionResult | N
         return None
 
     keywords = _foreground_keywords(step)
-    focused = window.focus_window_by_keywords(keywords) if keywords else window.focus_lark()
+    if step.metadata.get("focus_vc_meeting"):
+        focused = window.focus_lark_meeting()
+    else:
+        focused = window.focus_window_by_keywords(keywords) if keywords else window.focus_lark()
     active_title = window.get_active_window_title()
     logger.log(
         state,

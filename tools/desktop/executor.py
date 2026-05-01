@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import time
 import re
+import subprocess
+from pathlib import Path
 
 import pyautogui
 import pyperclip
+from PIL import Image
 
 from app.config import settings
 from core.schemas import ActionResult, LocatedTarget, PlanStep
@@ -99,12 +102,23 @@ class ActionExecutor:
                 pyautogui.hotkey("ctrl", "a")
                 time.sleep(0.05)
             text = self._input_text_for_step(step)
-            pyperclip.copy(text)
-            pyautogui.hotkey("ctrl", "v")
+            if step.metadata.get("type_via_keyboard"):
+                pyautogui.write(text, interval=0.03)
+            else:
+                pyperclip.copy(text)
+                pyautogui.hotkey("ctrl", "v")
             if step.metadata.get("press_enter_after_type"):
                 time.sleep(0.1)
                 pyautogui.press("enter")
             return f"type_text length={len(text)}"
+
+        if step.action == "paste_image":
+            image_path = str(step.metadata.get("image_path") or step.input_text or "").strip()
+            if not image_path:
+                raise ValueError("paste_image action requires image_path metadata or input_text")
+            self._copy_image_to_clipboard(self._resolve_image_path(image_path))
+            pyautogui.hotkey("ctrl", "v")
+            return f"paste_image path={image_path}"
 
         if step.action == "hotkey":
             if not step.hotkeys:
@@ -130,7 +144,11 @@ class ActionExecutor:
             return f"conditional_click at {center}"
 
         if step.action == "scroll":
-            amount = step.scroll_amount if step.scroll_amount is not None else -3
+            target_amount = target.metadata.get("scroll_amount") if target else None
+            amount = int(target_amount) if target_amount is not None else (step.scroll_amount if step.scroll_amount is not None else -3)
+            step.scroll_amount = amount
+            if center is not None:
+                pyautogui.moveTo(center[0], center[1], duration=0.1)
             pyautogui.scroll(amount)
             return f"scroll {amount}"
 
@@ -140,6 +158,11 @@ class ActionExecutor:
             return f"wait {seconds}"
 
         if step.action == "focus_window":
+            if step.metadata.get("focus_vc_meeting"):
+                manager = WindowManager()
+                if manager.focus_lark_meeting():
+                    return "focus Feishu/Lark meeting window"
+                raise RuntimeError("Could not focus Feishu/Lark meeting window")
             if step.metadata.get("focus_docs_editor"):
                 manager = WindowManager()
                 if manager.focus_docs_editor():
@@ -162,6 +185,68 @@ class ActionExecutor:
             return f"{step.action} no-op"
 
         raise ValueError(f"unsupported action: {step.action}")
+
+    @staticmethod
+    def _copy_image_to_clipboard(path: Path) -> None:
+        path = path.resolve()
+        if not path.exists():
+            raise FileNotFoundError(f"image file does not exist: {path}")
+        image = Image.open(path).convert("RGB")
+        try:
+            import win32clipboard  # type: ignore[import-not-found]
+            import win32con  # type: ignore[import-not-found]
+        except Exception as exc:
+            image.close()
+            ActionExecutor._copy_image_to_clipboard_powershell(path)
+            return
+        from io import BytesIO
+
+        output = BytesIO()
+        try:
+            image.save(output, "BMP")
+            data = output.getvalue()[14:]
+        finally:
+            image.close()
+            output.close()
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32con.CF_DIB, data)
+        finally:
+            win32clipboard.CloseClipboard()
+
+    @staticmethod
+    def _copy_image_to_clipboard_powershell(path: Path) -> None:
+        quoted = str(path).replace("'", "''")
+        command = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "Add-Type -AssemblyName System.Drawing; "
+            f"$img=[System.Drawing.Image]::FromFile('{quoted}'); "
+            "try { [System.Windows.Forms.Clipboard]::SetImage($img) } finally { $img.Dispose() }"
+        )
+        completed = subprocess.run(
+            [
+                "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                "-NoProfile",
+                "-STA",
+                "-Command",
+                command,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(f"PowerShell image clipboard fallback failed: {completed.stderr.strip()}")
+
+    @staticmethod
+    def _resolve_image_path(raw_path: str) -> Path:
+        path = Path(raw_path)
+        if path.is_absolute() or path.exists():
+            return path
+        backend_root = Path(__file__).resolve().parents[2]
+        return backend_root / path
 
     @staticmethod
     def _center(step: PlanStep, target: LocatedTarget | None) -> tuple[int, int] | None:

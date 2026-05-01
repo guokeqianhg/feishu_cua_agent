@@ -1,0 +1,16 @@
+id: vc_start_meeting_with_devices_guarded
+name: VC guarded start meeting with camera and microphone
+product: vc
+instruction: 发起视频会议，并且打开摄像头和麦克风。
+expected_result: A guarded video meeting is started through Feishu GUI, with camera and microphone enabled when explicitly allowed.
+tags:
+  - vc
+  - guarded
+  - real-gui
+timeout_seconds: 300
+metadata:
+  plan_template: vc_start_meeting_guarded
+  safety_guard_required: true
+  vc_action: start_meeting
+  desired_camera_on: true
+  desired_mic_on: true

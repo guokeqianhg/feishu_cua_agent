@@ -65,9 +65,21 @@ class Settings(BaseModel):
     auto_select_healthy_monitor: bool = os.getenv("CUA_LARK_AUTO_SELECT_HEALTHY_MONITOR", "true").lower() == "true"
     allow_send_message: bool = os.getenv("CUA_LARK_ALLOW_SEND_MESSAGE", "false").lower() == "true"
     allowed_im_target: str = os.getenv("CUA_LARK_ALLOWED_IM_TARGET", "")
+    allow_send_image: bool = os.getenv("CUA_LARK_ALLOW_SEND_IMAGE", "false").lower() == "true"
+    allow_create_group: bool = os.getenv("CUA_LARK_ALLOW_CREATE_GROUP", "false").lower() == "true"
+    allow_emoji_reaction: bool = os.getenv("CUA_LARK_ALLOW_EMOJI_REACTION", "false").lower() == "true"
+    allowed_group_member: str = os.getenv("CUA_LARK_ALLOWED_GROUP_MEMBER", "")
+    im_test_image_path: str = os.getenv("CUA_LARK_IM_TEST_IMAGE_PATH", "")
     allow_doc_create: bool = os.getenv("CUA_LARK_ALLOW_DOC_CREATE", "false").lower() == "true"
+    allow_doc_share: bool = os.getenv("CUA_LARK_ALLOW_DOC_SHARE", "false").lower() == "true"
+    allowed_doc_share_recipient: str = os.getenv("CUA_LARK_ALLOWED_DOC_SHARE_RECIPIENT", "")
     allow_calendar_create: bool = os.getenv("CUA_LARK_ALLOW_CALENDAR_CREATE", "false").lower() == "true"
     allow_calendar_invite: bool = os.getenv("CUA_LARK_ALLOW_CALENDAR_INVITE", "false").lower() == "true"
+    allow_calendar_modify: bool = os.getenv("CUA_LARK_ALLOW_CALENDAR_MODIFY", "false").lower() == "true"
+    allow_vc_start: bool = os.getenv("CUA_LARK_ALLOW_VC_START", "false").lower() == "true"
+    allow_vc_join: bool = os.getenv("CUA_LARK_ALLOW_VC_JOIN", "false").lower() == "true"
+    allow_vc_device_toggle: bool = os.getenv("CUA_LARK_ALLOW_VC_DEVICE_TOGGLE", "false").lower() == "true"
+    vc_meeting_id: str = os.getenv("CUA_LARK_VC_MEETING_ID", "")
 
 
 settings = Settings()

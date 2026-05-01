@@ -30,9 +30,16 @@ def runtime_context(dry_run_override: bool | None = None) -> RuntimeContext:
         allow_mock_real_execution=settings.allow_mock_real_execution,
         allow_send_message=settings.allow_send_message,
         allowed_im_target=settings.allowed_im_target or None,
+        allow_send_image=settings.allow_send_image,
+        allow_create_group=settings.allow_create_group,
+        allow_emoji_reaction=settings.allow_emoji_reaction,
+        allowed_group_member=settings.allowed_group_member or None,
         allow_doc_create=settings.allow_doc_create,
         allow_calendar_create=settings.allow_calendar_create,
         allow_calendar_invite=settings.allow_calendar_invite,
+        allow_vc_start=settings.allow_vc_start,
+        allow_vc_join=settings.allow_vc_join,
+        allow_vc_device_toggle=settings.allow_vc_device_toggle,
         monitor_index=settings.monitor_index,
     )
 

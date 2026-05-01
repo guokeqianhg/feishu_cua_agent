@@ -1,0 +1,16 @@
+id: vc_toggle_devices_guarded
+name: VC guarded toggle camera and microphone
+product: vc
+instruction: 在当前视频会议中打开摄像头和麦克风。
+expected_result: The current video meeting remains active and camera/microphone controls reflect the requested state.
+tags:
+  - vc
+  - guarded
+  - real-gui
+timeout_seconds: 180
+metadata:
+  plan_template: vc_toggle_devices_guarded
+  safety_guard_required: true
+  vc_action: toggle_devices
+  desired_camera_on: true
+  desired_mic_on: true

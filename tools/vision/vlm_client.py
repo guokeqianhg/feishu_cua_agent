@@ -5,6 +5,7 @@ import json
 import re
 import tempfile
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from core.schemas import (
     TestPlan,
     UIElement,
 )
+from verification.registry import local_verify_step
 
 
 def _json_payload(text: str) -> dict[str, Any]:
@@ -164,7 +166,180 @@ def _normalize_verification_payload(payload: dict[str, Any]) -> dict[str, Any]:
         payload["reason"] = ""
     if payload.get("confidence") is None:
         payload["confidence"] = 0.0
+    payload["raw_model_output"] = {
+        key: value
+        for key, value in payload.items()
+        if key
+        not in {
+            "success",
+            "confidence",
+            "reason",
+            "matched_criteria",
+            "failed_criteria",
+            "failure_category",
+            "raw_model_output",
+        }
+    }
     return payload
+
+
+def _calendar_busy_free_payload_is_valid(payload: dict[str, Any]) -> bool:
+    if not bool(payload.get("success")):
+        return True
+    checks = {
+        "calendar_visible": payload.get("calendar_visible"),
+        "contact_selected": payload.get("contact_selected"),
+        "target_date_visible": payload.get("target_date_visible"),
+        "target_time_visible": payload.get("target_time_visible"),
+    }
+    availability = str(payload.get("availability_state") or "").lower()
+    if any(value is None for value in checks.values()):
+        return False
+    if not all(bool(value) for value in checks.values()):
+        return False
+    if availability not in {"busy", "free"}:
+        return False
+    return True
+
+
+def _normalize_calendar_busy_free_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = _normalize_verification_payload(payload)
+    if not _calendar_busy_free_payload_is_valid(payload):
+        payload["success"] = False
+        payload["confidence"] = min(float(payload.get("confidence") or 0.0), 0.35)
+        payload["failure_category"] = "verification_failed"
+        payload["reason"] = (
+            "Calendar busy/free VLM output failed structured gate: "
+            f"calendar_visible={payload.get('calendar_visible')}, "
+            f"contact_selected={payload.get('contact_selected')}, "
+            f"target_date_visible={payload.get('target_date_visible')}, "
+            f"target_time_visible={payload.get('target_time_visible')}, "
+            f"availability_state={payload.get('availability_state')}. "
+            f"Original reason: {payload.get('reason') or ''}"
+        )
+        failed = payload.get("failed_criteria")
+        if isinstance(failed, list):
+            failed.append("structured_busy_free_gate")
+        else:
+            payload["failed_criteria"] = ["structured_busy_free_gate"]
+    return payload
+
+
+def _calendar_time_parts(raw_time: str) -> tuple[str, str, str]:
+    now = datetime.now()
+    if "后天" in raw_time or "寰屽ぉ" in raw_time:
+        day_offset = 2
+    elif "明天" in raw_time or "鏄庡ぉ" in raw_time:
+        day_offset = 1
+    else:
+        day_offset = 0
+    event_date = now + timedelta(days=day_offset)
+    start_hour = 10
+    start_minute = 0
+    match = re.search(r"(\d{1,2}):(\d{2})", raw_time)
+    if match:
+        start_hour = int(match.group(1))
+        start_minute = int(match.group(2))
+    start_dt = event_date.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
+    end_dt = start_dt + timedelta(minutes=30)
+    return start_dt.strftime("%Y-%m-%d"), start_dt.strftime("%H:%M"), end_dt.strftime("%H:%M")
+
+
+def _verification_prompt(step: PlanStep, before: Observation | None, after: Observation) -> str:
+    verifier = str(step.metadata.get("local_verifier") or "")
+    if verifier == "calendar_busy_free_visible" or step.id == "verify_busy_free_timeline":
+        return f"""
+You are verifying a real Feishu/Lark Calendar busy/free lookup from the screenshot.
+Return JSON only. Required fields:
+- success: boolean
+- confidence: number from 0 to 1
+- reason: string
+- matched_criteria: string[]
+- failed_criteria: string[]
+- failure_category: string
+- calendar_visible: boolean
+- contact_selected: boolean
+- target_date_visible: boolean
+- target_time_visible: boolean
+- availability_state: "busy" | "free" | "unknown"
+- evidence_region: string describing the exact visual region used
+- compressed_event_cards: boolean
+
+Task-specific rule:
+- This is NOT an event-creation verification. The workflow should only observe availability and must not save a new event.
+- Feishu may show a searched/contact calendar by checking a contact row in the left panel and overlaying that person's availability on the existing week/day grid. It does not have to create a separate standalone "contact timeline" panel.
+- If the search result row for the requested contact shows a blue checkmark or selected state, count that as contact_selected even when the left "my calendars" or "subscribed" area is ambiguous.
+- Pass if the screenshot shows Calendar open, the requested contact is selected/checked or visibly present as a selected contact calendar, the target time range is visible/readable, and the grid shows either a busy/free colored block or a clear empty available slot at that target time for the selected contact.
+- If a colored block near the target time contains partial text from an event or contact, treat it as busy/free evidence. Do not confuse this with failure merely because the card is narrow or overlaps other events.
+- Fail if the contact was only typed in the search box but not selected/checked, if the target time is not visible, if a create-event/editor/dialog is open, or if the screen is not Calendar.
+- If the local evidence below says the target hour is readable and target_slot_has_busy_color is true, inspect that exact target slot ROI first. Use the full screenshot to confirm contact selection and date context.
+- Prefer local_evidence.contact_search_result_selected and local_evidence.contact_search_result_check_pixels when deciding contact_selected.
+- Do not pass with availability_state="unknown". If the slot is visually empty for the selected contact, use availability_state="free"; if colored/busy blocks overlap the target slot, use "busy". If the contact is selected and the target slot is visible but empty, "free" is the correct outcome, not "unknown".
+
+Expected busy/free lookup:
+- contact(s): {step.metadata.get("attendees") or []}
+- event_date: {step.metadata.get("event_date") or ""}
+- start_time: {step.metadata.get("start_time") or step.metadata.get("event_time") or ""}
+- local_evidence: {step.metadata.get("busy_free_local_evidence") or {}}
+
+Step:
+{step.model_dump_json()}
+
+Before observation:
+{before.model_dump_json() if before else "null"}
+
+After observation:
+{after.model_dump_json()}
+""".strip()
+
+    if verifier in {"calendar_event_visible", "calendar_case"} or step.id in {"verify_event", "final_calendar_event_visible"}:
+        return f"""
+You are verifying a real Feishu/Lark Calendar GUI test from the screenshot.
+Return JSON only with: success, confidence, reason, matched_criteria, failed_criteria, failure_category.
+
+Task-specific rule:
+- Do not require OCR-readable title text inside the week grid. If multiple events share the same time, event cards may be narrow.
+- Use visual understanding of the Calendar week/day view: date columns, time-axis labels, colored event blocks, and whether the target time slot contains a meeting/event.
+- Pass only if the screenshot shows the target date/time area and a visible Calendar event/meeting block at or very near that time.
+- Fail if the view is on the wrong product/window, wrong date, wrong time range, no event block near the target time, or a modal/dialog is still blocking completion.
+- If the event title is visible, use it as strong evidence. If not visible because cards are narrow, use the event block at the requested date/time as evidence and explain that limitation.
+- The expected date below is authoritative. When the week grid shows adjacent date columns, identify the column whose day number matches event_date. Do not describe or pass a neighboring column such as May 1 when event_date is May 2.
+- If you mention a date in the reason, it must match event_date exactly or clearly say the event block is on the event_date column.
+
+Expected Calendar event:
+- title: {step.metadata.get("event_title") or ""}
+- event_date: {step.metadata.get("event_date") or ""}
+- start_time: {step.metadata.get("start_time") or step.metadata.get("event_time") or ""}
+- end_time: {step.metadata.get("end_time") or ""}
+- attendees: {step.metadata.get("attendees") or []}
+- local_evidence: {step.metadata.get("calendar_event_local_evidence") or {}}
+
+When local_evidence.target_slot_has_event_color is true, inspect local_evidence.target_slot_roi first.
+If local_evidence.target_slot_right_edge_clipped is true, the event card may be truncated by the visible window edge; do not fail only because the full title is not readable.
+
+Step:
+{step.model_dump_json()}
+
+Before observation:
+{before.model_dump_json() if before else "null"}
+
+After observation:
+{after.model_dump_json()}
+""".strip()
+
+    return f"""
+Verify whether this GUI test step has reached the expected state.
+Return JSON with: success, confidence, reason, matched_criteria, failed_criteria, failure_category.
+
+Step:
+{step.model_dump_json()}
+
+Before:
+{before.model_dump_json() if before else "null"}
+
+After:
+{after.model_dump_json()}
+""".strip()
 
 
 class BaseVLMClient(ABC):
@@ -264,7 +439,7 @@ class MockVLMClient(BaseVLMClient):
         )
 
     def locate_element(self, observation: Observation, step: PlanStep) -> LocatedTarget:
-        if step.action in ("wait", "hotkey", "type_text", "focus_window", "verify", "finish"):
+        if step.action in ("wait", "hotkey", "type_text", "paste_image", "focus_window", "verify", "finish"):
             return LocatedTarget(step_id=step.id, source="none", confidence=1.0, reason="Action does not require pointer location.")
         if step.coordinates:
             return LocatedTarget(step_id=step.id, source="manual", center=step.coordinates, confidence=1.0, reason="Coordinates provided by plan.")
@@ -427,7 +602,7 @@ OCR lines:
             return observation
 
     def locate_element(self, observation: Observation, step: PlanStep) -> LocatedTarget:
-        if step.action in ("wait", "hotkey", "focus_window", "verify", "finish"):
+        if step.action in ("wait", "hotkey", "paste_image", "focus_window", "verify", "finish"):
             return super().locate_element(observation, step)
         original_size = _image_size(observation.screenshot_path)
         model_max_side = 1280
@@ -509,6 +684,29 @@ Step action: {step.action}
     def verify_step(self, step: PlanStep, before: Observation | None, after: Observation | None) -> StepVerification:
         if after is None:
             return StepVerification(success=False, reason="No after observation available.", failure_category="perception_failed")
+        prompt = _verification_prompt(step, before, after)
+        try:
+            raw_payload = _json_payload(self._chat_vision(prompt, after.screenshot_path))
+            if str(step.metadata.get("local_verifier") or "") == "calendar_busy_free_visible" or step.id == "verify_busy_free_timeline":
+                payload = _normalize_calendar_busy_free_payload(raw_payload)
+            else:
+                payload = _normalize_verification_payload(raw_payload)
+            return StepVerification.model_validate(payload)
+        except Exception as exc:
+            if not settings.dry_run:
+                return StepVerification(
+                    success=False,
+                    confidence=0.0,
+                    reason=f"Real VLM verification failed; mock fallback is disabled during real desktop execution: {exc}",
+                    failed_criteria=[step.expected_state or step.id],
+                    failure_category="verification_failed",
+                    raw_model_output={"provider": "vlm_error", "error": str(exc)},
+                )
+            return super().verify_step(step, before, after)
+
+    def _generic_verify_step(self, step: PlanStep, before: Observation | None, after: Observation | None) -> StepVerification:
+        if after is None:
+            return StepVerification(success=False, reason="No after observation available.", failure_category="perception_failed")
         prompt = f"""
 Verify whether this GUI test step has reached the expected state.
 Return JSON with: success, confidence, reason, matched_criteria, failed_criteria, failure_category.
@@ -540,7 +738,43 @@ After:
     def verify_case(self, case: TestCase, plan: TestPlan, final_observation: Observation | None) -> StepVerification:
         if final_observation is None:
             return StepVerification(success=False, reason="No final observation available.", failure_category="perception_failed")
-        prompt = f"""
+        template = str(case.metadata.get("plan_template") or "")
+        if case.product == "calendar" or template.startswith("calendar_"):
+            event_time = str(case.metadata.get("new_event_time") or case.metadata.get("event_time") or "")
+            event_date, start_time, end_time = _calendar_time_parts(event_time)
+            if template == "calendar_view_busy_free_guarded":
+                step = PlanStep(
+                    id="verify_busy_free_timeline",
+                    action="verify",
+                    expected_state=case.expected_result or case.instruction,
+                    metadata={
+                        "local_verifier": "calendar_busy_free_visible",
+                        "event_time": event_time,
+                        "event_date": event_date,
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "attendees": case.metadata.get("attendees") or [],
+                    },
+                )
+                local_verify_step(case, step, None, final_observation)
+            else:
+                step = PlanStep(
+                    id="final_calendar_event_visible",
+                    action="verify",
+                    expected_state=case.expected_result or case.instruction,
+                    metadata={
+                        "local_verifier": "calendar_case",
+                        "event_title": str(case.metadata.get("event_title") or ""),
+                        "event_time": event_time,
+                        "event_date": event_date,
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "attendees": case.metadata.get("attendees") or [],
+                    },
+                )
+            prompt = _verification_prompt(step, None, final_observation)
+        else:
+            prompt = f"""
 Verify whether the whole Feishu/Lark GUI test case passed.
 Return JSON with: success, confidence, reason, matched_criteria, failed_criteria, failure_category.
 
@@ -554,7 +788,11 @@ Final observation:
 {final_observation.model_dump_json()}
 """.strip()
         try:
-            payload = _normalize_verification_payload(_json_payload(self._chat_vision(prompt, final_observation.screenshot_path)))
+            raw_payload = _json_payload(self._chat_vision(prompt, final_observation.screenshot_path))
+            if case.product == "calendar" and str(case.metadata.get("plan_template") or "") == "calendar_view_busy_free_guarded":
+                payload = _normalize_calendar_busy_free_payload(raw_payload)
+            else:
+                payload = _normalize_verification_payload(raw_payload)
             return StepVerification.model_validate(payload)
         except Exception as exc:
             if not settings.dry_run:

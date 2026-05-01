@@ -1,6 +1,6 @@
 CUA-Lark 后端任务清单、测试方式与下一步计划
-版本：v3
-更新时间：2026-04-25
+版本：v5
+更新时间：2026-04-30 19:09
 
 说明：
 本文档基于当前 backend 代码、README.md、ACCEPTANCE.md、任务规格文档和最近真实运行报告整理。
@@ -19,133 +19,334 @@ CUA-Lark 后端目标是实现一个飞书桌面 GUI 智能测试 Agent。
 它不调用飞书开放平台 API 完成任务，而是像真实用户一样：
 1. 截图观察当前桌面。
 2. 理解自然语言任务。
-3. 规划多步操作。
+3. 将任务路由到 IM、Docs、Calendar 等子产品 workflow。
 4. 用鼠标、键盘真实操作飞书桌面端和浏览器文档编辑器。
 5. 每一步截图验证。
 6. 生成可回放的 summary.md、summary.json、steps.jsonl 和截图证据。
 
 
-二、当前真实 E2E 完成情况
+二、对照任务规格的当前完成情况
 
-1. IM 发送链路：已跑通
+任务规格中要求重点覆盖：
+1. 日历 Calendar：创建日程、邀请参会人、修改日程时间、查看忙闲状态。
+2. 云文档 Docs：创建文档、编辑文本内容、插入标题/列表、分享文档。
+3. IM：发送文本/图片消息、创建群组、@ 提及、搜索消息记录、表情回复。
+
+当前状态：
+1. IM 六项核心能力最新真实回归全部通过：文本、图片、建群、@ 提及、消息搜索、表情回复。
+2. Docs 创建文档、富文本编辑和分享文档最新真实回归全部通过。
+3. Calendar 四项能力均有较早真实通过报告；最近一轮回归四项均失败，需要下一轮优先修复。
+4. 仍需要继续做多轮回归，尤其是 Docs 浏览器编辑器前台状态、分享弹窗、Calendar 参会人搜索、忙闲订阅状态、日历编辑器残留状态这类受账号状态影响的界面。
+
+
+三、最新真实回归矩阵
+
+统计时间：2026-04-30 19:09。
+口径：优先列最近一次真实报告；如果最近一次失败，同时列最后已知通过报告。
+
+IM：
+1. 发送文本消息：最新通过，`runs\reports\run_20260426_173819_7c6c0263`，7/7 步通过。
+2. 发送图片消息：最新通过，`runs\reports\run_20260426_174305_4aaa8145`，7/7 步通过。
+3. 创建群组：最新通过，`runs\reports\run_20260426_183354_ac0c06f0`，10/10 步通过。
+4. @ 提及：最新通过，`runs\reports\run_20260426_180101_f8712542`，9/9 步通过。
+5. 搜索消息记录：最新通过，`runs\reports\run_20260426_174845_c9d4c0b4`，6/6 步通过。
+6. 表情回复：最新通过，`runs\reports\run_20260426_184529_54dfb4ac`，9/10 步通过，1 步条件跳过。
+
+Docs：
+1. 创建文档：最新通过，`runs\reports\run_20260430_185053_44f5eb5f`，12/15 步通过，3 步条件跳过。
+2. 编辑文本内容 / 插入标题和列表：最新通过，`runs\reports\run_20260430_190149_573da0e8`，14/17 步通过，3 步条件跳过。
+3. 分享文档：最新通过，`runs\reports\run_20260430_190926_55597bc7`，21/24 步通过，3 步条件跳过。
+
+Calendar：
+1. 创建日程：最近失败，`runs\reports\run_20260426_165223_0bd0a1f3`，失败原因为 Calendar attendee search result was not locally confirmed by OCR；最后已知通过 `runs\reports\run_20260426_110901_06bdf40b`。
+2. 邀请参会人：最近失败，`runs\reports\run_20260426_165410_4c3ec35b`，失败原因为 Calendar attendee search result was not locally confirmed by OCR；最后已知通过 `runs\reports\run_20260426_130145_6805e8ae`。
+3. 修改日程时间：最近失败，`runs\reports\run_20260426_165551_430bb4be`，失败原因为最终 OCR 未找到日程标题且修改后时间未命中；最后已知通过 `runs\reports\run_20260426_120155_ad2c1bea`。
+4. 查看忙闲状态：最近失败，`runs\reports\run_20260426_165749_76613279`，失败原因为 2026-04-27 10:00 附近未看到李新元忙闲条目；最后已知通过 `runs\reports\run_20260426_152523_2aec6992`。
+
+
+四、Docs 当前进展
+
+1. 创建文档：已真实验证通过
+
+case：
+`cases\docs_create_doc.yaml`
+
+最新真实通过报告：
+`runs\reports\run_20260426_164952_cfa7cc19`
 
 能力：
-1. 搜索联系人或会话。
-2. OCR 校验目标搜索结果行。
-3. 打开目标会话。
-4. 使用当前输入焦点直接输入消息，避免额外乱点、拖动或点到表情。
-5. 安全开关允许后发送消息。
-6. 验证消息在目标会话中可见。
-
-关键保护：
-1. `CUA_LARK_ALLOW_SEND_MESSAGE=true` 是真实发送总开关。
-2. `CUA_LARK_ALLOWED_IM_TARGET` 可限制真实发送目标。
-3. OCR 必须确认目标行，避免误点其他搜索结果。
-4. 打开会话后直接输入，不再额外点击或长按拖动。
+1. 打开飞书云文档。
+2. hover “新建”打开菜单。
+3. OCR 定位并点击“文档”。
+4. 点击“新建空白文档”加号卡片。
+5. 等待浏览器文档编辑器打开。
+6. 输入标题和正文。
+7. 验证标题和正文可见。
 
 推荐命令：
 
 ```powershell
 $env:DRY_RUN="false"
 $env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
-$env:CUA_LARK_ALLOW_SEND_MESSAGE="true"
-$env:CUA_LARK_ALLOWED_IM_TARGET="吴佳园"
-python -B cli.py run --instruction "在IM中搜索吴佳园，发送一条消息：hello" --auto-debug
-```
-
-
-2. Docs 创建文档链路：已真实验证通过
-
-最近通过报告：
-`runs\reports\run_20260425_220621_3f36cadb`
-
-结果：
-1. `Status=pass`
-2. `Dry Run=False`
-3. `Allow Doc Create=True`
-4. 15 个步骤，12 pass，3 skipped。
-5. 文档标题和正文最终可见。
-
-当前流程：
-1. 聚焦飞书。
-2. 条件式关闭已有浮层或模板预览。
-3. 打开云文档。
-4. hover “新建”，不盲点。
-5. OCR 点击“文档”。
-6. OCR 点击“新建空白文档”的加号区域。
-7. 新文档在浏览器中打开后保持浏览器前台。
-8. 输入标题。
-9. Enter 进入正文。
-10. 输入正文。
-11. 验证标题和正文可见。
-
-推荐命令：
-
-```powershell
-$env:DRY_RUN="false"
-$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+$env:CUA_LARK_MODEL_PROVIDER="auto"
 $env:CUA_LARK_ALLOW_DOC_CREATE="true"
 python -B cli.py run-case cases\docs_create_doc.yaml --auto-debug
 ```
 
 
-3. Calendar 创建日程链路：已真实验证通过
+2. 编辑文本内容 / 插入标题和列表：能力已实现，最近回归失败
 
-最近通过报告：
-`runs\reports\run_20260425_234727_6d3a0cd2`
+case：
+`cases\docs_rich_edit_guarded.yaml`
 
-结果：
-1. `Status=pass`
-2. `Dry Run=False`
-3. `Allow Calendar Create=True`
-4. 16 个步骤，13 pass，3 skipped。
-5. `click_event_start_day` 使用 OCR 定位，点击 `(704, 986)`。
-6. 最终 `verify_event` 本地 OCR 确认 `title_hit=True, date_hit=True, time_hit=True`。
+最后已知真实通过报告：
+`runs\reports\run_20260426_092617_6d2d3742`
 
-当前流程：
-1. 聚焦飞书。
-2. 条件式关闭 stale 日程编辑器或确认弹窗。
-3. 打开日历。
-4. 选中“日历”页签。
-5. 点击“创建日程”。
-6. 输入标题。
-7. 打开开始日期选择器。
-8. 通过 OCR 识别日期选择器标题和 7 列日期网格。
-9. 根据 `event_date` 计算目标日期格中心，禁止 VLM 猜测兜底。
-10. 输入开始时间和结束时间。
-11. 保存日程。
-12. 等待保存后界面稳定。
-13. 本地 OCR 验证日程标题、日期和时间。
+最近失败报告：
+`runs\reports\run_20260426_165144_960cbbc1`
+
+当前判断：
+1. 能力曾真实通过，标题、正文、标题块和列表项均可见。
+2. 最近一轮卡在 Docs screen 本地确认，属于入口/前台状态回归问题，不是富文本编辑步骤本身失败。
+
+能力：
+1. 新建测试文档。
+2. 输入正文。
+3. 插入标题“本周进展”。
+4. 插入列表项“完成IM扩展、调试Calendar、调试Docs”。
+5. OCR/视觉验证富文本内容存在。
 
 推荐命令：
 
 ```powershell
 $env:DRY_RUN="false"
 $env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+$env:CUA_LARK_MODEL_PROVIDER="auto"
+$env:CUA_LARK_ALLOW_DOC_CREATE="true"
+python -B cli.py run-case cases\docs_rich_edit_guarded.yaml --auto-debug
+```
+
+
+3. 分享文档：能力已实现，最近回归失败
+
+case：
+`cases\docs_share_doc_guarded.yaml`
+
+最后已知真实通过报告：
+`runs\reports\run_20260426_105229_bbd6d4ed`
+
+最近失败报告：
+`runs\reports\run_20260426_165204_744838e6`
+
+当前判断：
+1. 分享能力曾真实通过，最终验证为 Docs share flow completed and final share dialog is stable。
+2. 最近一轮卡在 Docs screen 本地确认，下一轮应优先修复 Docs 入口/浏览器编辑器前台状态。
+
+能力：
+1. 新建测试文档。
+2. 输入标题和正文。
+3. 打开分享弹窗。
+4. 搜索分享对象“李新元”。
+5. 选择搜索结果并添加。
+6. 点击最终确认/分享按钮。
+7. 验证收件人搜索状态关闭，分享流程稳定结束。
+
+推荐命令：
+
+```powershell
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+$env:CUA_LARK_MODEL_PROVIDER="auto"
+$env:CUA_LARK_ALLOW_DOC_CREATE="true"
+$env:CUA_LARK_ALLOW_DOC_SHARE="true"
+$env:CUA_LARK_ALLOWED_DOC_SHARE_RECIPIENT="李新元"
+python -B cli.py run-case cases\docs_share_doc_guarded.yaml --auto-debug
+```
+
+
+五、Calendar 当前进展
+
+1. 创建日程：能力已实现，最近回归失败
+
+case：
+`cases\calendar_create_event.yaml`
+
+最后已知真实通过报告：
+`runs\reports\run_20260426_110901_06bdf40b`
+
+最近失败报告：
+`runs\reports\run_20260426_165223_0bd0a1f3`
+
+当前失败原因：
+Calendar attendee search result was not locally confirmed by OCR。
+
+能力：
+1. 打开飞书日历。
+2. 进入日历主 tab。
+3. 点击创建日程。
+4. 输入标题。
+5. 用 OCR 日期网格选择目标日期。
+6. 输入开始和结束时间。
+7. 保存日程。
+8. OCR 验证标题、日期、时间。
+
+推荐命令：
+
+```powershell
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+$env:CUA_LARK_MODEL_PROVIDER="auto"
 $env:CUA_LARK_ALLOW_CALENDAR_CREATE="true"
-$env:CUA_LARK_ALLOW_CALENDAR_INVITE="false"
 python -B cli.py run-case cases\calendar_create_event.yaml --auto-debug
 ```
 
 
-三、当前关键技术实现
+2. 邀请参会人：能力已实现，最近回归失败
 
-1. 产品工作流模板
+case：
+`cases\calendar_invite_attendee_guarded.yaml`
+
+最后已知真实通过报告：
+`runs\reports\run_20260426_130145_6805e8ae`
+
+最近失败报告：
+`runs\reports\run_20260426_165410_4c3ec35b`
+
+当前失败原因：
+Calendar attendee search result was not locally confirmed by OCR。
+
+能力：
+1. 创建测试日程。
+2. 在参会人输入框中搜索“李新元”。
+3. OCR 定位并点击参会人搜索结果。
+4. 条件式处理可能出现的添加参会人确认弹窗。
+5. 保存日程。
+
+推荐命令：
+
+```powershell
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+$env:CUA_LARK_MODEL_PROVIDER="auto"
+$env:CUA_LARK_ALLOW_CALENDAR_CREATE="true"
+$env:CUA_LARK_ALLOW_CALENDAR_INVITE="true"
+python -B cli.py run-case cases\calendar_invite_attendee_guarded.yaml --auto-debug
+```
+
+
+3. 修改日程时间：能力已实现，最近回归失败
+
+case：
+`cases\calendar_modify_event_time_guarded.yaml`
+
+最后已知真实通过报告：
+`runs\reports\run_20260426_120155_ad2c1bea`
+
+最近失败报告：
+`runs\reports\run_20260426_165551_430bb4be`
+
+当前失败原因：
+最终 OCR 未找到日程标题，且修改后时间未命中。
+
+能力：
+1. 创建测试日程。
+2. 输入初始开始/结束时间。
+3. 将开始时间从 10:00 修改为 11:00。
+4. 将结束时间从 10:30 修改为 11:30。
+5. 保存并验证。
+
+推荐命令：
+
+```powershell
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+$env:CUA_LARK_MODEL_PROVIDER="auto"
+$env:CUA_LARK_ALLOW_CALENDAR_CREATE="true"
+$env:CUA_LARK_ALLOW_CALENDAR_MODIFY="true"
+python -B cli.py run-case cases\calendar_modify_event_time_guarded.yaml --auto-debug
+```
+
+
+4. 查看忙闲状态：能力已实现，最近回归失败
+
+case：
+`cases\calendar_view_busy_free_guarded.yaml`
+
+最后已知真实通过报告：
+`runs\reports\run_20260426_152523_2aec6992`
+
+最近失败报告：
+`runs\reports\run_20260426_165749_76613279`
+
+当前失败原因：
+2026-04-27 10:00 附近未看到李新元忙闲条目。
+
+能力：
+1. 打开日历主界面。
+2. 搜索联系人“李新元”。
+3. 点击联系人搜索结果或在已订阅状态下跳过重复点击。
+4. 在时间轴上观察忙闲信息，不保存任何日程。
+5. 验证右侧主时间轴区域存在忙闲相关证据。
+
+关键修正：
+1. 搜索结果右侧图标使用像素级状态判断。
+2. 灰色图标表示可订阅/可选择，才点击。
+3. 蓝色已选中图标表示已经订阅，跳过点击，避免再次点击触发“退订成功”。
+4. 忙闲验证只看右侧主时间轴区域，避免左侧搜索结果、右侧聊天窗口和其他 UI 造成误判。
+5. 验证要求联系人/自身/时间轴/日历网格/绿色忙闲标记等证据组合成立。
+
+推荐命令：
+
+```powershell
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+$env:CUA_LARK_MODEL_PROVIDER="auto"
+python -B cli.py run-case cases\calendar_view_busy_free_guarded.yaml --auto-debug
+```
+
+
+六、IM 当前进展摘要
+
+IM 已从原始文本发送 MVP 扩展为完整建议测试场景，且 2026-04-26 18:45 前最新真实回归全部通过：
+1. `cases\im_send_message_guarded.yaml`：发送文本消息，最新通过 `runs\reports\run_20260426_173819_7c6c0263`。
+2. `cases\im_send_image_guarded.yaml`：发送图片消息，最新通过 `runs\reports\run_20260426_174305_4aaa8145`。
+3. `cases\im_create_group_guarded.yaml`：创建群组，最新通过 `runs\reports\run_20260426_183354_ac0c06f0`。
+4. `cases\im_mention_user_guarded.yaml`：@ 提及测试群成员，最新通过 `runs\reports\run_20260426_180101_f8712542`。
+5. `cases\im_search_messages.yaml`：搜索消息记录，最新通过 `runs\reports\run_20260426_174845_c9d4c0b4`。
+6. `cases\im_emoji_reaction_guarded.yaml`：表情回复，最新通过 `runs\reports\run_20260426_184529_54dfb4ac`。
+7. `cases\im_full_suite.yaml`：IM 扩展 suite。
+
+IM 基线发消息的关键约束仍保留：
+1. 搜索结果必须 OCR 确认目标行。
+2. 选中目标会话后直接输入，不额外点击、拖动或长按。
+3. 真实发送必须开启 `CUA_LARK_ALLOW_SEND_MESSAGE=true`。
+4. 可用 `CUA_LARK_ALLOWED_IM_TARGET` 限定测试群或测试联系人。
+5. Guarded IM 动作前会确认当前右侧会话仍是允许目标。
+6. IM 错误操作库会识别“打开错误会话”“停在全局搜索”“进入私聊”等错误状态并阻止继续乱点。
+7. 建群流程已处理飞书白屏加载态，并用 OCR 定位成员输入框、群名输入框和创建按钮。
+8. 表情回复先 OCR 定位目标消息，再只在消息附近寻找快捷表情按钮。
+
+
+七、关键技术实现
+
+1. 自然语言语义路由
 
 主要文件：
-1. `products\workflows.py`
-2. `intent\parser.py`
-3. `cases\*.yaml`
+1. `intent\parser.py`
+2. `agent\nodes\plan_task.py`
+3. `products\workflows.py`
 
-已覆盖模板：
-1. `im_search_only`
-2. `im_send_message_guarded`
-3. `docs_open_smoke`
-4. `docs_create_doc_guarded`
-5. `calendar_create_event_guarded`
+已支持的 Docs / Calendar 意图：
+1. `docs_create_doc`
+2. `docs_rich_edit`
+3. `docs_share_doc`
+4. `calendar_create_event`
+5. `calendar_invite_attendee`
+6. `calendar_modify_event_time`
+7. `calendar_view_busy_free`
 
 
-2. OCR / 视觉 / 布局混合定位
+2. OCR / 视觉 / 像素融合定位
 
 主要文件：
 1. `tools\vision\lark_locator.py`
@@ -154,11 +355,11 @@ python -B cli.py run-case cases\calendar_create_event.yaml --auto-debug
 
 已完成：
 1. IM 搜索结果 OCR 精确目标行。
-2. Docs 新建菜单和空白文档卡片 OCR 定位。
-3. Calendar 创建按钮、保存按钮、日历页签 OCR 定位。
+2. Docs 新建菜单、空白文档卡片、分享按钮、分享收件人输入框、收件人结果、确认按钮定位。
+3. Calendar 创建按钮、保存按钮、日历页签、参会人搜索结果定位。
 4. Calendar 日期选择器按年月标题和 7 列网格定位目标日期。
-5. 对关键 Calendar 日期点击启用 `require_lark_locator`，定位失败即停，不退回 VLM 猜测。
-6. 对 VLM 坐标做缩放校正，兼容截图 resize 后坐标反投影问题。
+5. Calendar 忙闲联系人搜索结果和订阅状态图标定位。
+6. 对 VLM 坐标做缩放校正，兼容“原始截图尺寸 -> resize 给模型 -> 模型输出坐标 -> 反投影回原始截图”的流程。
 
 
 3. 条件式闭环动作
@@ -178,7 +379,8 @@ python -B cli.py run-case cases\calendar_create_event.yaml --auto-debug
 1. 只有检测到浮层时才按 Esc。
 2. 只有检测到关闭按钮时才点击。
 3. Docs 创建文档时使用 hover 打开菜单。
-4. 防止硬编码式开环操作。
+4. Calendar 清理旧编辑器、旧确认框、旧参会人弹窗和会议室侧栏。
+5. 防止硬编码式开环操作。
 
 
 4. 本地验证
@@ -188,46 +390,45 @@ python -B cli.py run-case cases\calendar_create_event.yaml --auto-debug
 2. `tools\vision\ocr_client.py`
 
 已完成：
-1. IM smoke 本地验证。
-2. Docs 可见性验证。
-3. Calendar 可见性验证。
-4. Calendar 最终日程 OCR 验证。
-5. 避免最终 VLM 将已成功的 Calendar 日程误判为失败。
+1. Docs 文档标题/正文可见性验证。
+2. Docs 富文本标题和列表可见性验证。
+3. Docs 分享弹窗和分享完成状态验证。
+4. Calendar 日程标题、日期、时间验证。
+5. Calendar 参会人输入/搜索结果验证。
+6. Calendar 忙闲时间轴验证。
 
 
-四、当前已有 case
+八、当前已有 case
 
+IM：
 1. `cases\smoke_search_only.yaml`
-- IM 安全搜索 smoke。
-- 不进入会话，不发送消息。
-
 2. `cases\im_search_only.yaml`
-- IM 搜索目标安全用例。
-- 不发送消息。
-
 3. `cases\im_send_message_guarded.yaml`
-- 受保护 IM 发送。
-- 需要 `CUA_LARK_ALLOW_SEND_MESSAGE=true`。
+4. `cases\im_send_image_guarded.yaml`
+5. `cases\im_create_group_guarded.yaml`
+6. `cases\im_mention_user_guarded.yaml`
+7. `cases\im_search_messages.yaml`
+8. `cases\im_emoji_reaction_guarded.yaml`
+9. `cases\im_full_suite.yaml`
 
-4. `cases\docs_open_smoke.yaml`
-- Docs 入口安全 smoke。
-- 不创建、不编辑文档。
+Docs：
+1. `cases\docs_open_smoke.yaml`
+2. `cases\docs_create_doc.yaml`
+3. `cases\docs_rich_edit_guarded.yaml`
+4. `cases\docs_share_doc_guarded.yaml`
 
-5. `cases\docs_create_doc.yaml`
-- 受保护 Docs 创建测试文档。
-- 需要 `CUA_LARK_ALLOW_DOC_CREATE=true`。
-- 已真实验证通过。
+Calendar：
+1. `cases\calendar_create_event.yaml`
+2. `cases\calendar_invite_attendee_guarded.yaml`
+3. `cases\calendar_modify_event_time_guarded.yaml`
+4. `cases\calendar_view_busy_free_guarded.yaml`
 
-6. `cases\calendar_create_event.yaml`
-- 受保护 Calendar 创建测试日程。
-- 需要 `CUA_LARK_ALLOW_CALENDAR_CREATE=true`。
-- 已真实验证通过。
-
-7. `cases\safe_smoke_suite.yaml`
-- IM + Docs 安全 smoke suite。
+Suite：
+1. `cases\safe_smoke_suite.yaml`
+2. `cases\docs_calendar_extended_suite.yaml`
 
 
-五、推荐验收顺序
+九、推荐验收顺序
 
 1. 导入检查：
 
@@ -251,173 +452,117 @@ $env:CUA_LARK_MODEL_PROVIDER="mock"
 $env:DRY_RUN="true"
 $env:CUA_LARK_PLACEHOLDER_SCREENSHOT="true"
 python -B cli.py run-suite cases\safe_smoke_suite.yaml --auto-debug
+python -B cli.py run-suite cases\docs_calendar_extended_suite.yaml --auto-debug
 ```
 
-4. IM 安全 smoke：
+4. Docs 真实回归：
 
 ```powershell
-$env:DRY_RUN="false"
-$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
-python -B cli.py run-case cases\smoke_search_only.yaml --auto-debug
-```
-
-5. Docs 创建文档：
-
-```powershell
+$env:CUA_LARK_MODEL_PROVIDER="auto"
 $env:DRY_RUN="false"
 $env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
 $env:CUA_LARK_ALLOW_DOC_CREATE="true"
 python -B cli.py run-case cases\docs_create_doc.yaml --auto-debug
+python -B cli.py run-case cases\docs_rich_edit_guarded.yaml --auto-debug
 ```
 
-6. Calendar 创建日程：
+5. Docs 分享真实回归：
 
 ```powershell
+$env:CUA_LARK_ALLOW_DOC_SHARE="true"
+$env:CUA_LARK_ALLOWED_DOC_SHARE_RECIPIENT="李新元"
+python -B cli.py run-case cases\docs_share_doc_guarded.yaml --auto-debug
+```
+
+6. Calendar 真实回归：
+
+```powershell
+$env:CUA_LARK_MODEL_PROVIDER="auto"
 $env:DRY_RUN="false"
 $env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
 $env:CUA_LARK_ALLOW_CALENDAR_CREATE="true"
-$env:CUA_LARK_ALLOW_CALENDAR_INVITE="false"
 python -B cli.py run-case cases\calendar_create_event.yaml --auto-debug
 ```
 
+7. Calendar 邀请和修改真实回归：
 
-六、对照任务规格的完成度
+```powershell
+$env:CUA_LARK_ALLOW_CALENDAR_INVITE="true"
+python -B cli.py run-case cases\calendar_invite_attendee_guarded.yaml --auto-debug
 
-M1 单步操作：
-状态：基本完成。
+$env:CUA_LARK_ALLOW_CALENDAR_MODIFY="true"
+python -B cli.py run-case cases\calendar_modify_event_time_guarded.yaml --auto-debug
+```
 
-已完成：
-1. 截图。
-2. 点击。
-3. hover。
-4. 输入。
-5. 快捷键。
-6. wait。
-7. 窗口聚焦。
-8. 条件式点击和条件式快捷键。
+8. Calendar 忙闲状态真实回归：
 
-待补强：
-1. double_click 在更多真实飞书场景中验证。
-2. right_click 在更多真实飞书场景中验证。
-3. drag 在更多真实飞书场景中验证。
-4. scroll 在更多真实飞书场景中验证。
+```powershell
+python -B cli.py run-case cases\calendar_view_busy_free_guarded.yaml --auto-debug
+```
 
 
-M2 流程串联：
-状态：完成 MVP。
+十、当前总体完成度估计
 
-已完成：
-1. IM 搜索、打开会话、发送、验证。
-2. Docs 新建文档、输入标题正文、验证。
-3. Calendar 新建日程、选择日期时间、保存、验证。
-
-
-M3 多产品覆盖：
-状态：已达到最低要求并超过 2 个产品。
-
-已完成：
-1. IM。
-2. Docs。
-3. Calendar。
-
-待扩展：
-1. Base。
-2. VC。
-3. Mail。
-
-
-M4 评估体系：
-状态：基本完成。
-
-已完成：
-1. summary.md。
-2. summary.json。
-3. steps.jsonl。
-4. screenshots。
-5. suite_summary。
-6. 运行模式、安全开关、截图诊断、每步坐标、输入和验证原因记录。
-
-
-M5 进阶优化：
-状态：部分完成。
-
-已完成：
-1. 截图健康检查。
-2. 黑屏保护。
-3. mock 真实执行保护。
-4. abort 中断。
-5. auto-debug。
-6. OCR 与布局混合定位。
-7. 条件式闭环弹窗处理。
-
-待补强：
-1. 更系统的自愈重规划。
-2. Accessibility / UI Automation 融合。
-3. 录制回放。
-4. 自动生成更多测试用例。
-5. 失败报告自动归因和修复建议。
-
-
-七、当前总体完成度估计
-
-1. 工程结构：85%
+1. 工程结构：90%
 2. CLI/API：80%
 3. 截图诊断：90%
-4. IM 真实 E2E：85%
-5. Docs 创建 E2E：80%
-6. Calendar 创建 E2E：80%
+4. IM 扩展 E2E：95%
+5. Docs 创建/编辑/分享 E2E：70%-80%，创建最新通过，富文本/分享需修复入口回归。
+6. Calendar 创建/邀请/修改/忙闲 E2E：65%-75%，均有已知通过报告，但最近一轮回归失败。
 7. 报告体系：85%
 8. 安全调试闭环：85%
-9. OCR/混合定位：70%
-10. 自愈重规划：35%
-11. 交付文档/Demo：55%
+9. OCR/视觉/像素混合定位：80%
+10. 自愈重规划：40%
+11. 交付文档/Demo：65%
 
 整体 MVP 完成度：
-约 75%-85%。
+约 78%-85%。IM 已进入可回归状态；Docs / Calendar 下一阶段重点是恢复最近回归稳定性。
 
 
-八、下一步建议
+十一、下一步建议
 
-优先级 1：稳定化与回归
-1. 把 IM、Docs、Calendar 三条真实 E2E 各再跑 2-3 次。
-2. 汇总失败样本，补齐定位和验证边界。
-3. 建立一个只 dry-run / mock 的 CI 风格检查命令。
+优先级 1：回归稳定性
+1. 优先修复 Docs 富文本/分享最近卡住的 Docs screen 本地确认问题。
+2. 优先修复 Calendar 参会人搜索 OCR、最终日程 OCR、忙闲时间轴证据识别问题。
+3. 对 Docs 三条真实链路各跑 2-3 次。
+4. 对 Calendar 四条真实链路各跑 2-3 次。
+5. IM 六条核心链路可作为当前稳定基线继续回归。
 
-优先级 2：Accessibility / OCR 融合
+优先级 2：报告字段补齐
+1. `RuntimeContext` 增加 `allow_doc_share`、`allowed_doc_share_recipient`、`allow_calendar_modify`。
+2. `report_writer` 打印这些字段。
+3. summary 中补充自然语言解析出的 share_recipient、new_event_time 等关键字段。
+
+优先级 3：Accessibility / OCR 融合
 1. 引入 Windows UI Automation 获取控件 bbox。
 2. 用 OCR 确认文字，用 accessibility 确认控件角色和 bbox。
-3. 点击时使用 bbox 中心或安全区域。
+3. 最终点击选择目标 bbox 中心或安全点击区域。
 
-优先级 3：更多产品覆盖
-1. Base。
-2. VC。
-3. Mail。
-
-优先级 4：交付材料
-1. Demo 视频。
-2. 答辩 PPT。
-3. system_design.md 补充架构图。
-4. evaluation.md 补充真实运行结果表。
+优先级 4：评估材料
+1. 更新 `ACCEPTANCE.md`。
+2. 更新 `docs\evaluation.md` 的真实报告表。
+3. 准备 Demo 视频和答辩脚本。
+4. 明确哪些截图报告不适合提交到 GitHub。
 
 
-九、注意事项
+十二、注意事项
 
 1. 永远不要提交 `.env`。
 2. 永远不要提交 API Key、Authorization header、真实 cookies。
 3. `runs/` 报告截图可能包含真实桌面内容，默认不要提交到 GitHub。
 4. 真实 IM 发送只对测试联系人或测试群执行。
 5. Docs / Calendar 创建只使用无害测试标题和测试内容。
-6. 如果截图黑屏、窗口不对或 mock 回退，不要强行真实执行。
+6. Docs 分享只分享给明确测试联系人，例如“李新元”。
+7. 如果截图黑屏、窗口不对或 mock 回退，不要强行真实执行。
 
 
-十、结论
+十三、结论
 
-当前项目已经具备可演示的飞书桌面 GUI Agent MVP：
-1. 能理解自然语言和 YAML case。
-2. 能真实操作飞书。
-3. 能覆盖 IM、Docs、Calendar 三个子产品。
-4. 能输出可回放报告。
-5. 有安全开关和条件式闭环处理。
-6. Calendar 日期选择已经从 VLM 猜测改成 OCR 网格定位，避免误点到相邻日期或月份。
+当前项目已经具备可演示的飞书桌面 GUI Agent MVP，并且已经从“单条创建链路”推进到“IM / Docs / Calendar 多场景覆盖”：
+1. IM 已覆盖文本、图片、建群、@ 提及、搜索消息、表情回复，并且最新真实回归全部通过。
+2. Docs 已覆盖创建、编辑、标题/列表、分享；创建最新通过，富文本/分享最近回归失败但有已知通过报告。
+3. Calendar 已覆盖创建、邀请参会人、修改时间、忙闲状态查看；四项均有已知通过报告，但最近回归失败，需要优先恢复稳定性。
+4. 每条链路都有 guarded 安全开关和可回放报告。
+5. 定位策略已经从固定坐标转向 OCR、视觉、像素状态和条件式动作融合。
 
-下一阶段建议从“能跑通”转向“多次回归稳定”和“更强闭环感知”。
+下一阶段建议从“能力实现”转向“多轮回归稳定、报告字段完善和交付材料整理”。

@@ -25,7 +25,7 @@ def ocr_image(image_path: str | Path, roi_bbox: BoundingBox | None = None) -> li
     img = cv2.imread(str(image_path))
     if img is None:
         return []
-    
+
     # 裁剪ROI区域
     if roi_bbox:
         x1, y1, x2, y2 = int(roi_bbox.x1), int(roi_bbox.y1), int(roi_bbox.x2), int(roi_bbox.y2)
@@ -39,12 +39,12 @@ def ocr_image(image_path: str | Path, roi_bbox: BoundingBox | None = None) -> li
         offset_x, offset_y = x1, y1
     else:
         offset_x, offset_y = 0, 0
-    
+
     # 执行OCR
     result, _ = ocr(img)
     if not result:
         return []
-    
+
     # 转换为标准格式
     ocr_results = []
     for box_points, text, confidence in result:
@@ -58,7 +58,7 @@ def ocr_image(image_path: str | Path, roi_bbox: BoundingBox | None = None) -> li
             y2=round(max(ys)) + offset_y
         )
         ocr_results.append((bbox, text.strip(), float(confidence)))
-    
+
     return ocr_results
 
 def _normalize_text(text: str) -> str:
@@ -99,14 +99,14 @@ def match_text_in_region(image_path: str | Path, target_text: str, roi_bbox: Bou
     results = ocr_image(image_path, roi_bbox)
     if not results:
         return None, "", 0.0
-    
+
     target_norm = _normalize_text(target_text)
     if not target_norm:
         return None, "", 0.0
     best_match = None
     best_score = 0.0
     best_text = ""
-    
+
     for bbox, text, confidence in results:
         text_norm = _normalize_text(text)
         if not text_norm:
@@ -118,7 +118,7 @@ def match_text_in_region(image_path: str | Path, target_text: str, roi_bbox: Bou
                 best_score = score
                 best_match = _expand_bbox(bbox, image_path)
                 best_text = text
-    
+
     return best_match, best_text, best_score
 
 

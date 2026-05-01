@@ -27,6 +27,16 @@ def _contains_text(observation_text: str, expected: str) -> bool:
     return expected.lower() in observation_text.lower()
 
 
+def _template(state: AgentState) -> str:
+    return str(state.test_case.metadata.get("plan_template") or "").strip()
+
+
+def _should_defer_local_case_pass_to_vlm(state: AgentState, verification: StepVerification | None) -> bool:
+    if verification is None or not verification.success:
+        return False
+    return _is_real_execution(state) and _template(state) == "calendar_view_busy_free_guarded"
+
+
 def _observation_text(state: AgentState) -> str:
     if state.after_observation is None:
         return ""
@@ -181,6 +191,8 @@ def final_verify_node(state: AgentState) -> AgentState:
     verification = None
     if not (state.runtime and state.runtime.mock_verification):
         verification = local_verify_case(state.test_case, state.final_observation)
+    if _should_defer_local_case_pass_to_vlm(state, verification):
+        verification = None
     if verification is None:
         verification = vlm.verify_case(state.test_case, state.plan, state.final_observation)
     if _is_real_execution(state) and _raw_provider(verification) in ("mock", "vlm_error"):

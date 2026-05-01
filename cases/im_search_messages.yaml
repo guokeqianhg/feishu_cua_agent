@@ -1,0 +1,17 @@
+id: im_search_messages_001
+name: 飞书 IM 搜索聊天记录
+product: im
+instruction: "在飞书 IM 中搜索聊天记录 hello from CUA，不发送任何消息。"
+preconditions:
+  - 飞书桌面客户端已打开并登录。
+expected_result: "聊天记录搜索结果或相关消息结果可见，且没有发送任何消息。"
+tags:
+  - im
+  - safe
+  - search
+  - e2e
+timeout_seconds: 240
+metadata:
+  plan_template: im_search_messages_guarded
+  search_text: "hello from CUA"
+  safe_smoke: false

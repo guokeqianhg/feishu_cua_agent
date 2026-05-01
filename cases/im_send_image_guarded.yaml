@@ -1,0 +1,19 @@
+id: im_send_image_guarded_001
+name: 飞书 IM 受保护发送图片消息
+product: im
+instruction: "在飞书 IM 中搜索测试群，发送一张测试图片。"
+preconditions:
+  - 飞书桌面客户端已打开并登录。
+  - 必须使用测试群或测试联系人。
+  - 真实发送前必须设置 CUA_LARK_ALLOW_SEND_IMAGE=true。
+expected_result: "图片只会在安全开关开启且目标匹配时发送到指定测试会话。"
+tags:
+  - im
+  - guarded
+  - image
+  - e2e
+timeout_seconds: 300
+metadata:
+  plan_template: im_send_image_guarded
+  target: "测试群"
+  image_path: "assets/im_test_image.png"

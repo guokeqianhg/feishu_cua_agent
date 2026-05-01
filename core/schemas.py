@@ -16,6 +16,7 @@ ActionType = Literal[
     "scroll",
     "hover",
     "type_text",
+    "paste_image",
     "hotkey",
     "wait",
     "focus_window",
@@ -203,9 +204,16 @@ class RuntimeContext(BaseModel):
     allow_mock_real_execution: bool = False
     allow_send_message: bool = False
     allowed_im_target: str | None = None
+    allow_send_image: bool = False
+    allow_create_group: bool = False
+    allow_emoji_reaction: bool = False
+    allowed_group_member: str | None = None
     allow_doc_create: bool = False
     allow_calendar_create: bool = False
     allow_calendar_invite: bool = False
+    allow_vc_start: bool = False
+    allow_vc_join: bool = False
+    allow_vc_device_toggle: bool = False
     monitor_index: int | None = None
 
 

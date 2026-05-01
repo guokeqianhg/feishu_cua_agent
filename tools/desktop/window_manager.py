@@ -87,7 +87,21 @@ class WindowManager:
         matches = process_matches or title_matches
         if not matches:
             return None
+        main_matches = [
+            item
+            for item in matches
+            if not any(marker in item[1] for marker in ("会议", "Meeting", "meeting"))
+        ]
+        if main_matches:
+            return main_matches[0][0]
         return matches[0][0]
+
+    def find_lark_meeting_window(self) -> int | None:
+        return self.find_window_by_keywords(("飞书会议", "椋炰功浼氳", "Feishu Meeting", "Lark Meeting"))
+
+    def focus_lark_meeting(self) -> bool:
+        hwnd = self.find_lark_meeting_window()
+        return self.focus_hwnd(hwnd)
 
     def find_window_by_keywords(self, keywords: list[str] | tuple[str, ...]) -> int | None:
         normalized = [item.lower() for item in keywords if item]

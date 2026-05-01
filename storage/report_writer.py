@@ -59,9 +59,16 @@ class ReportWriter:
                     f"- Allow Mock Real Execution: {report.runtime.allow_mock_real_execution}",
                     f"- Allow Send Message: {report.runtime.allow_send_message}",
                     f"- Allowed IM Target: {report.runtime.allowed_im_target or ''}",
+                    f"- Allow Send Image: {report.runtime.allow_send_image}",
+                    f"- Allow Create Group: {report.runtime.allow_create_group}",
+                    f"- Allow Emoji Reaction: {report.runtime.allow_emoji_reaction}",
+                    f"- Allowed Group Member: {report.runtime.allowed_group_member or ''}",
                     f"- Allow Doc Create: {report.runtime.allow_doc_create}",
                     f"- Allow Calendar Create: {report.runtime.allow_calendar_create}",
                     f"- Allow Calendar Invite: {report.runtime.allow_calendar_invite}",
+                    f"- Allow VC Start: {report.runtime.allow_vc_start}",
+                    f"- Allow VC Join: {report.runtime.allow_vc_join}",
+                    f"- Allow VC Device Toggle: {report.runtime.allow_vc_device_toggle}",
                     f"- Monitor Index: {report.runtime.monitor_index}",
                 ]
             )

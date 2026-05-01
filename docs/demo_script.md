@@ -40,4 +40,3 @@ python cli.py run-case cases\im_send_message_guarded.yaml --auto-debug
 ```
 
 如果没有设置安全开关，系统应阻止会话打开、草稿输入或发送动作。
-

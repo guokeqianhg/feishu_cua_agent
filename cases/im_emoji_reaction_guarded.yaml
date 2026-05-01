@@ -1,0 +1,20 @@
+id: im_emoji_reaction_guarded_001
+name: 飞书 IM 受保护表情回复
+product: im
+instruction: "在测试群中找到 hello from CUA 相关消息，并用点赞表情回复。"
+preconditions:
+  - 飞书桌面客户端已打开并登录。
+  - 测试群中已有可见的 hello from CUA 测试消息。
+  - 真实表情回复前必须设置 CUA_LARK_ALLOW_EMOJI_REACTION=true。
+expected_result: "只在显式授权时对测试消息添加点赞表情回复。"
+tags:
+  - im
+  - guarded
+  - reaction
+  - e2e
+timeout_seconds: 300
+metadata:
+  plan_template: im_emoji_reaction_guarded
+  target: "测试群"
+  search_text: "hello from CUA"
+  emoji_name: "点赞"

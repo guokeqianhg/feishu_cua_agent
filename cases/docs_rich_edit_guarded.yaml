@@ -1,0 +1,22 @@
+id: docs_rich_edit_guarded_001
+name: Guarded Docs heading and list edit
+product: docs
+instruction: "在飞书云文档中新建一个测试文档，标题为「CUA Docs 富文本测试」，正文为「hello docs rich」，插入标题「本周进展」和列表「完成IM扩展、调试Calendar、调试Docs」。"
+preconditions:
+  - The current account can create Docs.
+expected_result: "A guarded test document is created and contains heading/list content."
+tags:
+  - docs
+  - rich-edit
+  - guarded
+timeout_seconds: 360
+metadata:
+  plan_template: docs_rich_edit_guarded
+  safety_guard_required: true
+  doc_title: "CUA Docs 富文本测试"
+  doc_body: "hello docs rich"
+  doc_heading: "本周进展"
+  doc_list_items:
+    - "完成IM扩展"
+    - "调试Calendar"
+    - "调试Docs"

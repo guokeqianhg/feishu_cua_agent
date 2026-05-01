@@ -1,0 +1,14 @@
+id: vc_start_meeting_guarded
+name: VC guarded start meeting
+product: vc
+instruction: 只是发起视频会议。
+expected_result: A guarded video meeting is created through Feishu GUI.
+tags:
+  - vc
+  - guarded
+  - real-gui
+timeout_seconds: 300
+metadata:
+  plan_template: vc_start_meeting_guarded
+  safety_guard_required: true
+  vc_action: start_meeting

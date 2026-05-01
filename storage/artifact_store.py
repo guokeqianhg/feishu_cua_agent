@@ -25,4 +25,3 @@ class ArtifactStore:
     @staticmethod
     def artifact_path(run_dir: str | os.PathLike[str], name: str) -> Path:
         return Path(run_dir) / "artifacts" / name
-

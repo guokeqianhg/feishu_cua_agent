@@ -1,0 +1,15 @@
+id: vc_join_meeting_guarded
+name: VC guarded join meeting
+product: vc
+instruction: 使用会议ID 259427455 加入视频会议。
+expected_result: A guarded video meeting is joined through Feishu GUI by meeting ID.
+tags:
+  - vc
+  - guarded
+  - real-gui
+timeout_seconds: 300
+metadata:
+  plan_template: vc_join_meeting_guarded
+  safety_guard_required: true
+  vc_action: join_meeting
+  meeting_id: "259427455"

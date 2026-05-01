@@ -1,0 +1,18 @@
+id: docs_share_doc_guarded_001
+name: Guarded Docs share document
+product: docs
+instruction: "在飞书云文档中新建一个测试文档，标题为「CUA Docs 分享测试」，正文为「hello docs share」，并分享给「李新元」。"
+preconditions:
+  - The current account can create and share Docs.
+expected_result: "A guarded test document is shared to the configured recipient only when sharing is explicitly enabled."
+tags:
+  - docs
+  - share
+  - guarded
+timeout_seconds: 420
+metadata:
+  plan_template: docs_share_doc_guarded
+  safety_guard_required: true
+  doc_title: "CUA Docs 分享测试"
+  doc_body: "hello docs share"
+  share_recipient: "李新元"

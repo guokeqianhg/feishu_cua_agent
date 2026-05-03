@@ -57,6 +57,7 @@ class ParsedIntent(BaseModel):
     attendees: list[str] = Field(default_factory=list)
     vc_action: str | None = None
     meeting_id: str | None = None
+    meeting_title: str | None = None
     desired_camera_on: bool | None = None
     desired_mic_on: bool | None = None
     safety_guard_required: bool = False
@@ -92,6 +93,7 @@ class ParsedIntent(BaseModel):
             "calendar_action",
             "vc_action",
             "meeting_id",
+            "meeting_title",
         ):
             value = getattr(self, key)
             if value:
@@ -243,6 +245,7 @@ def parse_instruction(instruction: str, product_hint: str = "unknown") -> Parsed
             product="vc",
             plan_template="vc_start_meeting_guarded",
             vc_action="start_meeting",
+            meeting_title=_extract_vc_meeting_title(text),
             desired_camera_on=camera_on,
             desired_mic_on=mic_on,
             safety_guard_required=True,
@@ -471,6 +474,8 @@ def _infer_product(text: str, hint: str) -> Product:
         return hint  # type: ignore[return-value]
     if _contains_any(text, ["视频会议", "发起会议", "加入会议", "会议id", "会议ID", "会议号", "摄像头", "麦克风", "vc", "video meeting"]):
         return "vc"
+    if "发起" in text and "会议" in text:
+        return "vc"
     if _mentions_docs(text):
         return "docs"
     if _contains_any(text, ["日历", "会议", "日程", "calendar", "meeting", "event"]):
@@ -634,10 +639,28 @@ def _extract_emoji_name(text: str) -> str | None:
 
 def _extract_named_value(text: str, names: list[str]) -> str | None:
     name_pattern = "|".join(re.escape(name) for name in names)
+    quoted_match = re.search(
+        rf"(?:{name_pattern})\s*(?:为|是|叫|:|：)\s*([\"'“”‘’「」『』])(.+?)([\"'“”‘’「」『』])",
+        text,
+        re.IGNORECASE,
+    )
+    if quoted_match and _is_matching_quote(quoted_match.group(1), quoted_match.group(3)):
+        return _strip_punctuation(quoted_match.group(2))
     match = re.search(rf"(?:{name_pattern})\s*(?:为|是|叫|:|：)\s*[\"'“”‘’「」『』]?(.+?)[\"'“”‘’「」『』]?(?:[，。；;]|$)", text, re.IGNORECASE)
     if match:
         return _strip_punctuation(match.group(1))
     return None
+
+
+def _is_matching_quote(left: str, right: str) -> bool:
+    return {
+        '"': '"',
+        "'": "'",
+        "“": "”",
+        "‘": "’",
+        "「": "」",
+        "『": "』",
+    }.get(left) == right
 
 
 def _quoted_items(text: str) -> list[str]:
@@ -672,7 +695,25 @@ def _is_doc_create_instruction(text: str) -> bool:
 def _is_doc_rich_edit_instruction(text: str) -> bool:
     if not _mentions_docs(text):
         return False
-    return _contains_any(text, ["标题", "一级标题", "二级标题", "列表", "项目符号", "编号", "heading", "list", "bullet"])
+    rich_markers = [
+        "一级标题",
+        "二级标题",
+        "三级标题",
+        "插入标题",
+        "添加标题",
+        "正文标题",
+        "小标题",
+        "列表",
+        "清单",
+        "项目符号",
+        "编号",
+        "有序列表",
+        "无序列表",
+        "heading",
+        "list",
+        "bullet",
+    ]
+    return _contains_any(text, rich_markers)
 
 
 def _is_doc_share_instruction(text: str) -> bool:
@@ -738,6 +779,12 @@ def _extract_doc_content(text: str) -> tuple[str | None, str | None]:
             body = _strip_common(quoted[-1])
     if body:
         body = re.split(r"(?:分享给|共享给|发送给|授权给|share with)", body, maxsplit=1, flags=re.IGNORECASE)[0]
+        body = re.split(
+            r"(?:插入标题|添加标题|正文标题|小标题|一级标题|二级标题|三级标题|和列表|并列表|列表|清单|项目符号|编号)",
+            body,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
         body = _strip_common(body)
     return title, body
 
@@ -822,7 +869,7 @@ def _extract_calendar_event(text: str) -> tuple[str | None, str | None, list[str
 
 
 def _is_vc_start_instruction(text: str) -> bool:
-    return _contains_any(
+    direct_start = _contains_any(
         text,
         [
             "发起会议",
@@ -833,11 +880,13 @@ def _is_vc_start_instruction(text: str) -> bool:
             "start a meeting",
             "new meeting",
         ],
-    ) and not _is_vc_join_instruction(text)
+    )
+    natural_start = "发起" in text and "会议" in text
+    return (direct_start or natural_start) and not _is_vc_join_instruction(text)
 
 
 def _is_vc_join_instruction(text: str) -> bool:
-    return _contains_any(
+    direct_join = _contains_any(
         text,
         [
             "加入会议",
@@ -849,6 +898,8 @@ def _is_vc_join_instruction(text: str) -> bool:
             "meeting id",
         ],
     )
+    natural_join_with_id = _contains_any(text, ["加入", "join"]) and bool(_extract_vc_meeting_id(text))
+    return direct_join or natural_join_with_id
 
 
 def _is_vc_device_instruction(text: str) -> bool:
@@ -870,6 +921,7 @@ def _is_vc_device_instruction(text: str) -> bool:
 
 def _extract_vc_meeting_id(text: str) -> str | None:
     for pattern in (
+        r"(?:会议\s*id|会议\s*ID|会议号|id|ID|meeting\s*id)\s*(?:为|是|:|：)?\s*([0-9\s-]{6,})",
         r"(?:会议\s*id|会议\s*ID|会议号|meeting\s*id)\s*[:：]?\s*([0-9\s-]{6,})",
         r"\b(\d[\d\s-]{5,}\d)\b",
     ):
@@ -879,6 +931,20 @@ def _extract_vc_meeting_id(text: str) -> str | None:
         meeting_id = re.sub(r"\D", "", match.group(1))
         if len(meeting_id) >= 6:
             return meeting_id
+    return None
+
+
+def _extract_vc_meeting_title(text: str) -> str | None:
+    quoted = _quoted_items(text)
+    if quoted and _contains_any(text, ["名为", "名字", "名称", "标题", "叫做", "叫"]):
+        return _strip_common(quoted[0])
+    for pattern in (
+        r"(?:名为|叫做|叫)\s*[\"'“”‘’「」『』]?([^，。；;\n\"'“”‘’「」『』]+)",
+        r"(?:会议名称|会议名|会议标题|名称|名字|标题)\s*(?:为|是|叫|:|：)\s*[\"'“”‘’「」『』]?([^，。；;\n\"'“”‘’「」『』]+)",
+    ):
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return _strip_common(match.group(1))
     return None
 
 

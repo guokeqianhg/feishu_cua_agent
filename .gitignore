@@ -7,3 +7,7 @@ runs/
 .venv/
 venv/
 .DS_Store
+repair.md
+tmo.txt
+start.txt
+*.pdf

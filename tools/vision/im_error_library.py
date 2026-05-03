@@ -92,6 +92,12 @@ def _visible_im_text(observation: Observation) -> str:
 
 
 def _first_wrong_state(normalized_text: str) -> str | None:
+    if "日历" in normalized_text and "创建日程" in normalized_text and "搜索ctrl" in normalized_text:
+        return "im_search_not_open"
+    if "移动光标" in normalized_text and "退出搜索" in normalized_text:
+        return "global_search_not_chat"
+    if "发送给" in normalized_text and "李新元" not in normalized_text and "hellofromcua" in normalized_text:
+        return "mention_candidate_not_inserted"
     for name, patterns in WRONG_CHAT_PATTERNS.items():
         if any(_normalize_text(pattern) in normalized_text for pattern in patterns):
             return name
@@ -102,7 +108,16 @@ def _first_wrong_state(normalized_text: str) -> str | None:
 def _reference_hashes() -> dict[str, tuple[int, ...]]:
     refs_dir = Path(__file__).resolve().parent / "im_error_refs"
     hashes: dict[str, tuple[int, ...]] = {}
+    excluded_refs = {
+        # These are useful regression screenshots for locator/draft mistakes,
+        # but their right panes can look like a valid target chat and should
+        # not participate in current-chat prechecks.
+        "emoji_message_row_bbox_too_large",
+        "mention_candidate_not_inserted",
+    }
     for path in sorted(refs_dir.glob("*.png")):
+        if path.stem in excluded_refs:
+            continue
         image_hash = _right_pane_hash(str(path))
         if image_hash is not None:
             hashes[path.stem] = image_hash

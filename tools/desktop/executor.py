@@ -60,6 +60,7 @@ class ActionExecutor:
             self._require_center(center, step)
             pyautogui.moveTo(center[0], center[1], duration=0.15)
             pyautogui.click(center[0], center[1])
+            self._wait_after_action(step)
             return f"click at {center}"
 
         if step.action == "hover":
@@ -72,6 +73,7 @@ class ActionExecutor:
             self._require_center(center, step)
             pyautogui.moveTo(center[0], center[1], duration=0.15)
             pyautogui.doubleClick(center[0], center[1])
+            self._wait_after_action(step)
             return f"double_click at {center}"
 
         if step.action == "right_click":
@@ -141,6 +143,7 @@ class ActionExecutor:
             self._require_center(center, step)
             pyautogui.moveTo(center[0], center[1], duration=0.15)
             pyautogui.click(center[0], center[1])
+            self._wait_after_action(step)
             return f"conditional_click at {center}"
 
         if step.action == "scroll":
@@ -264,6 +267,18 @@ class ActionExecutor:
     def _require_center(center: tuple[int, int] | None, step: PlanStep) -> None:
         if center is None:
             raise ValueError(f"{step.action} requires a located target")
+
+    @staticmethod
+    def _wait_after_action(step: PlanStep) -> None:
+        raw = step.metadata.get("wait_after_action_seconds")
+        if raw is None:
+            return
+        try:
+            seconds = float(raw)
+        except (TypeError, ValueError):
+            return
+        if seconds > 0:
+            time.sleep(seconds)
 
     @staticmethod
     def _input_text_for_step(step: PlanStep) -> str:

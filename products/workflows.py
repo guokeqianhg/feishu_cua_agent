@@ -61,6 +61,14 @@ def _im_search_only_plan(case: TestCase) -> TestPlan:
         product="im",
         steps=[
             PlanStep(
+                id="dismiss_stale_im_search_overlay",
+                action="conditional_hotkey",
+                hotkeys=["esc"],
+                expected_state="Any stale Feishu global search overlay is dismissed before opening IM.",
+                retry_limit=1,
+                metadata={"local_verifier": "visible_screen", "locator_strategy": "search_dialog_input"},
+            ),
+            PlanStep(
                 id="open_im",
                 action="click",
                 target_description="Feishu/Lark desktop window",
@@ -70,7 +78,7 @@ def _im_search_only_plan(case: TestCase) -> TestPlan:
             ),
             PlanStep(
                 id="focus_search",
-                action="hover",
+                action="click",
                 target_description="left sidebar search box",
                 expected_state="Feishu sidebar or global search input is focused.",
                 retry_limit=1,
@@ -125,6 +133,14 @@ def _im_send_message_guarded_plan(case: TestCase) -> TestPlan:
         product="im",
         steps=[
             PlanStep(
+                id="dismiss_stale_im_search_overlay",
+                action="conditional_hotkey",
+                hotkeys=["esc"],
+                expected_state="Any stale Feishu global search overlay is dismissed before opening IM.",
+                retry_limit=1,
+                metadata={"local_verifier": "visible_screen", "locator_strategy": "search_dialog_input"},
+            ),
+            PlanStep(
                 id="open_im",
                 action="click",
                 target_description="Feishu IM sidebar entry",
@@ -152,6 +168,26 @@ def _im_send_message_guarded_plan(case: TestCase) -> TestPlan:
                     "locator_strategy": "search_dialog_input",
                     "target": target,
                     "clear_before_type": True,
+                },
+            ),
+            PlanStep(
+                id="wait_search_results",
+                action="wait",
+                wait_seconds=1.0,
+                expected_state="IM search results have had time to populate.",
+                retry_limit=1,
+                metadata={"local_verifier": "visible_screen"},
+            ),
+            PlanStep(
+                id="select_group_results",
+                action="conditional_click",
+                target_description="group or conversation results tab",
+                expected_state="Group/conversation search results are selected when the tab is visible.",
+                retry_limit=1,
+                metadata={
+                    "local_verifier": "visible_screen",
+                    "locator_strategy": "im_search_group_tab",
+                    "locator_kind": "button",
                 },
             ),
             PlanStep(
@@ -390,6 +426,14 @@ def _im_search_messages_guarded_plan(case: TestCase) -> TestPlan:
         goal=case.instruction,
         product="im",
         steps=[
+            PlanStep(
+                id="dismiss_stale_im_search_overlay",
+                action="conditional_hotkey",
+                hotkeys=["esc"],
+                expected_state="Any stale Feishu global search overlay is dismissed before opening IM.",
+                retry_limit=1,
+                metadata={"local_verifier": "visible_screen", "locator_strategy": "search_dialog_input"},
+            ),
             PlanStep(
                 id="open_im",
                 action="click",
@@ -673,7 +717,9 @@ def _im_emoji_reaction_guarded_plan(case: TestCase) -> TestPlan:
                     "dangerous_emoji_reaction": True,
                     "locator_strategy": "im_quick_reaction_button",
                     "locator_kind": "button",
+                    "require_lark_locator": True,
                     "target": target,
+                    "search_text": search_text,
                     "emoji_name": emoji_name,
                 },
             ),
@@ -702,6 +748,14 @@ def _im_emoji_reaction_guarded_plan(case: TestCase) -> TestPlan:
 
 def _im_open_chat_steps(target: str, guard_key: str) -> list[PlanStep]:
     return [
+        PlanStep(
+            id="dismiss_stale_im_search_overlay",
+            action="conditional_hotkey",
+            hotkeys=["esc"],
+            expected_state="Any stale Feishu global search overlay is dismissed before opening IM.",
+            retry_limit=1,
+            metadata={"local_verifier": "visible_screen", "locator_strategy": "search_dialog_input"},
+        ),
         PlanStep(
             id="open_im",
             action="click",
@@ -738,6 +792,26 @@ def _im_open_chat_steps(target: str, guard_key: str) -> list[PlanStep]:
                 "locator_strategy": "search_dialog_input",
                 "target": target,
                 "clear_before_type": True,
+            },
+        ),
+        PlanStep(
+            id="wait_search_results",
+            action="wait",
+            wait_seconds=1.0,
+            expected_state="IM search results have had time to populate.",
+            retry_limit=1,
+            metadata={"local_verifier": "visible_screen"},
+        ),
+        PlanStep(
+            id="select_group_results",
+            action="conditional_click",
+            target_description="group or conversation results tab",
+            expected_state="Group/conversation search results are selected when the tab is visible.",
+            retry_limit=1,
+            metadata={
+                "local_verifier": "visible_screen",
+                "locator_strategy": "im_search_group_tab",
+                "locator_kind": "button",
             },
         ),
         PlanStep(
@@ -1997,6 +2071,7 @@ def _calendar_view_busy_free_guarded_plan(case: TestCase) -> TestPlan:
 def _vc_start_meeting_guarded_plan(case: TestCase) -> TestPlan:
     steps = _vc_open_steps()
     has_device_request = _vc_has_device_request(case)
+    meeting_title = str(case.metadata.get("meeting_title") or "").strip()
     steps.extend(
         [
             PlanStep(
@@ -2007,9 +2082,10 @@ def _vc_start_meeting_guarded_plan(case: TestCase) -> TestPlan:
                 retry_limit=2,
                 metadata={
                     "local_verifier": "vc_prejoin_or_in_meeting",
-                    "locator_strategy": "vc_start_meeting_button",
+                    "locator_strategy": "vc_start_meeting_button_fresh" if meeting_title else "vc_start_meeting_button",
                     "locator_kind": "button",
                     "requires_vc_start_guard": True,
+                    "preserve_after_foreground": True,
                 },
             ),
             PlanStep(
@@ -2023,44 +2099,65 @@ def _vc_start_meeting_guarded_plan(case: TestCase) -> TestPlan:
                     "locator_strategy": "vc_permission_allow_button",
                     "locator_kind": "button",
                     "require_lark_locator": True,
+                    "preserve_foreground": True,
                 },
             ),
         ]
     )
+    steps.append(
+        PlanStep(
+            id="wait_started_prejoin",
+            action="wait",
+            target_description="started meeting prejoin window",
+            expected_state="The started meeting prejoin or meeting window is visible.",
+            retry_limit=1,
+            wait_seconds=0.8,
+            metadata={"local_verifier": "vc_prejoin_or_in_meeting", "preserve_foreground": True},
+        )
+    )
+    if meeting_title:
+        steps.append(
+            PlanStep(
+                id="type_vc_meeting_title",
+                action="type_text",
+                target_description="video meeting title input",
+                input_text=meeting_title,
+                expected_state=f"Meeting title {meeting_title!r} is entered.",
+                retry_limit=1,
+                metadata={
+                    "local_verifier": "vc_meeting_title_entered",
+                    "locator_strategy": "vc_meeting_title_input",
+                    "locator_kind": "text_input",
+                    "meeting_title": meeting_title,
+                    "clear_before_type": True,
+                    "double_click_before_type": True,
+                    "require_lark_locator": True,
+                    "requires_vc_start_guard": True,
+                    "preserve_foreground": True,
+                },
+            )
+        )
+    steps.append(
+        PlanStep(
+            id="confirm_start_meeting",
+            action="conditional_click",
+            target_description="prejoin start or join meeting button",
+            expected_state="The video meeting room is visible.",
+            retry_limit=2,
+            metadata={
+                "local_verifier": "vc_in_meeting",
+                "locator_strategy": "vc_prejoin_join_button",
+                "locator_kind": "button",
+                "requires_vc_start_guard": True,
+                "dangerous_vc_start": True,
+                "skip_if_vc_in_meeting": True,
+                "preserve_foreground": True,
+                "wait_after_action_seconds": 6,
+            },
+        )
+    )
     if has_device_request:
-        steps.append(
-            PlanStep(
-                id="enter_started_meeting",
-                action="conditional_click",
-                target_description="join/start entry on the newly created meeting card",
-                expected_state="The started meeting prejoin or meeting window is visible.",
-                retry_limit=2,
-                metadata={
-                    "local_verifier": "vc_prejoin_or_in_meeting",
-                    "locator_strategy": "vc_meeting_card_join_button",
-                    "locator_kind": "button",
-                    "requires_vc_start_guard": True,
-                },
-            )
-        )
         steps.extend(_vc_device_steps(case))
-        steps.append(
-            PlanStep(
-                id="confirm_start_meeting",
-                action="conditional_click",
-                target_description="prejoin start or join meeting button",
-                expected_state="The video meeting room is visible.",
-                retry_limit=2,
-                metadata={
-                    "local_verifier": "vc_in_meeting",
-                    "locator_strategy": "vc_prejoin_join_button",
-                    "locator_kind": "button",
-                    "requires_vc_start_guard": True,
-                    "dangerous_vc_start": True,
-                    "skip_if_vc_in_meeting": True,
-                },
-            )
-        )
     steps.append(
         PlanStep(
             id="verify_vc_started",
@@ -2069,9 +2166,10 @@ def _vc_start_meeting_guarded_plan(case: TestCase) -> TestPlan:
             expected_state="The video meeting is created; if devices were requested, the meeting room is active.",
             retry_limit=1,
             metadata={
-                "local_verifier": "vc_in_meeting" if has_device_request else "vc_started_card_visible",
+                "local_verifier": "vc_in_meeting",
                 "desired_camera_on": case.metadata.get("desired_camera_on"),
                 "desired_mic_on": case.metadata.get("desired_mic_on"),
+                "preserve_foreground": True,
             },
         )
     )
@@ -2082,7 +2180,8 @@ def _vc_start_meeting_guarded_plan(case: TestCase) -> TestPlan:
         success_criteria=[
             "Feishu Video Meeting screen is reached through the GUI.",
             "Meeting start is guarded by CUA_LARK_ALLOW_VC_START=true.",
-            "Requested camera/microphone states are handled before entering the meeting when provided.",
+            "Optional meeting title is entered before starting the meeting when provided.",
+            "Requested camera/microphone states are handled after the meeting starts when provided.",
         ],
         assumptions=["The account can start a harmless test meeting and system camera/microphone permissions are available."],
         raw_model_output={"provider": "product_template", "template": "vc_start_meeting_guarded"},
@@ -2106,6 +2205,7 @@ def _vc_join_meeting_guarded_plan(case: TestCase) -> TestPlan:
                     "locator_kind": "button",
                     "requires_vc_join_guard": True,
                     "foreground_window_keywords": ["飞书", "Feishu", "Lark"],
+                    "preserve_after_foreground": True,
                 },
             ),
             PlanStep(
@@ -2122,11 +2222,9 @@ def _vc_join_meeting_guarded_plan(case: TestCase) -> TestPlan:
                     "meeting_id": meeting_id,
                     "clear_before_type": True,
                     "double_click_before_type": True,
-                    "type_via_keyboard": True,
-                    "press_enter_after_type": True,
                     "require_lark_locator": True,
                     "requires_vc_join_guard": True,
-                    "focus_vc_meeting": True,
+                    "preserve_foreground": True,
                 },
             ),
             PlanStep(
@@ -2140,11 +2238,11 @@ def _vc_join_meeting_guarded_plan(case: TestCase) -> TestPlan:
                     "locator_strategy": "vc_permission_allow_button",
                     "locator_kind": "button",
                     "require_lark_locator": True,
+                    "preserve_foreground": True,
                 },
             ),
         ]
     )
-    steps.extend(_vc_device_steps(case))
     steps.extend(
         [
             PlanStep(
@@ -2161,16 +2259,28 @@ def _vc_join_meeting_guarded_plan(case: TestCase) -> TestPlan:
                     "require_lark_locator": True,
                     "requires_vc_join_guard": True,
                     "dangerous_vc_join": True,
-                    "focus_vc_meeting": True,
+                    "preserve_foreground": True,
+                    "wait_after_action_seconds": 8,
                 },
             ),
+        ]
+    )
+    steps.extend(_vc_device_steps(case))
+    steps.extend(
+        [
             PlanStep(
                 id="verify_vc_joined",
                 action="verify",
                 target_description="video meeting room",
                 expected_state="The video meeting is active and device controls are visible.",
                 retry_limit=1,
-                metadata={"local_verifier": "vc_in_meeting", "meeting_id": meeting_id},
+                metadata={
+                    "local_verifier": "vc_in_meeting",
+                    "meeting_id": meeting_id,
+                    "desired_camera_on": case.metadata.get("desired_camera_on"),
+                    "desired_mic_on": case.metadata.get("desired_mic_on"),
+                    "preserve_foreground": True,
+                },
             ),
         ]
     )
@@ -2181,7 +2291,7 @@ def _vc_join_meeting_guarded_plan(case: TestCase) -> TestPlan:
         success_criteria=[
             f"Meeting ID {meeting_id!r} is entered through the GUI.",
             "Meeting join is guarded by CUA_LARK_ALLOW_VC_JOIN=true.",
-            "Requested camera/microphone states are handled before joining when provided.",
+            "Requested camera/microphone states are handled after joining when provided.",
         ],
         assumptions=["The provided meeting ID is valid for the current test account."],
         raw_model_output={"provider": "product_template", "template": "vc_join_meeting_guarded"},
@@ -2190,13 +2300,10 @@ def _vc_join_meeting_guarded_plan(case: TestCase) -> TestPlan:
 
 def _vc_toggle_devices_guarded_plan(case: TestCase) -> TestPlan:
     steps = [
-        PlanStep(
-            id="focus_lark",
-            action="focus_window",
-            target_description="Feishu/Lark video meeting window",
-            expected_state="Feishu/Lark is foreground before device control.",
-            retry_limit=1,
-            metadata={"local_verifier": "lark_focused", "foreground_window_keywords": ["飞书", "Feishu", "Lark"]},
+        _vc_focus_meeting_window_step(
+            "focus_vc_meeting",
+            "vc_in_meeting",
+            "The Feishu meeting child window is foreground before device control.",
         ),
         PlanStep(
             id="verify_vc_in_meeting_before_toggle",
@@ -2204,7 +2311,7 @@ def _vc_toggle_devices_guarded_plan(case: TestCase) -> TestPlan:
             target_description="video meeting room",
             expected_state="The video meeting is active before toggling devices.",
             retry_limit=1,
-            metadata={"local_verifier": "vc_in_meeting"},
+            metadata={"local_verifier": "vc_in_meeting", "preserve_foreground": True},
         ),
     ]
     steps.extend(_vc_device_steps(case, require_device_guard=True))
@@ -2219,6 +2326,7 @@ def _vc_toggle_devices_guarded_plan(case: TestCase) -> TestPlan:
                 "local_verifier": "vc_device_state",
                 "desired_camera_on": case.metadata.get("desired_camera_on"),
                 "desired_mic_on": case.metadata.get("desired_mic_on"),
+                "preserve_foreground": True,
             },
         )
     )
@@ -2237,6 +2345,18 @@ def _vc_toggle_devices_guarded_plan(case: TestCase) -> TestPlan:
 
 def _vc_has_device_request(case: TestCase) -> bool:
     return case.metadata.get("desired_camera_on") is not None or case.metadata.get("desired_mic_on") is not None
+
+
+def _vc_focus_meeting_window_step(step_id: str, verifier: str, expected_state: str) -> PlanStep:
+    return PlanStep(
+        id=step_id,
+        action="wait",
+        target_description="visible Feishu/Lark meeting child window",
+        expected_state=expected_state,
+        retry_limit=1,
+        wait_seconds=0.5,
+        metadata={"local_verifier": verifier},
+    )
 
 
 def _vc_open_steps() -> list[PlanStep]:
@@ -2258,6 +2378,18 @@ def _vc_open_steps() -> list[PlanStep]:
             metadata={"local_verifier": "visible_screen", "locator_strategy": "docs_transient_overlay"},
         ),
         PlanStep(
+            id="dismiss_vc_account_modal",
+            action="conditional_hotkey",
+            hotkeys=["esc"],
+            expected_state="A Feishu account-switch modal is dismissed only if present.",
+            retry_limit=1,
+            metadata={
+                "local_verifier": "visible_screen",
+                "locator_strategy": "vc_account_switch_modal",
+                "preserve_foreground": True,
+            },
+        ),
+        PlanStep(
             id="open_vc",
             action="click",
             target_description="Feishu video meeting sidebar entry",
@@ -2268,10 +2400,10 @@ def _vc_open_steps() -> list[PlanStep]:
         PlanStep(
             id="wait_vc_screen",
             action="wait",
-            wait_seconds=1.2,
+            wait_seconds=0.2,
             expected_state="Video meeting screen settles after navigation.",
             retry_limit=1,
-            metadata={"local_verifier": "vc_visible"},
+            metadata={"local_verifier": "visible_screen", "preserve_foreground": True},
         ),
     ]
 
@@ -2296,6 +2428,8 @@ def _vc_device_steps(case: TestCase, *, require_device_guard: bool = False) -> l
                     "requires_vc_device_toggle_guard": True,
                     "dangerous_vc_device_toggle": require_device_guard,
                     "skip_if_vc_device_state_matches": True,
+                    "preserve_foreground": True,
+                    "wait_after_action_seconds": 1,
                 },
             )
         )
@@ -2315,6 +2449,8 @@ def _vc_device_steps(case: TestCase, *, require_device_guard: bool = False) -> l
                     "requires_vc_device_toggle_guard": True,
                     "dangerous_vc_device_toggle": require_device_guard,
                     "skip_if_vc_device_state_matches": True,
+                    "preserve_foreground": True,
+                    "wait_after_action_seconds": 1,
                 },
             )
         )

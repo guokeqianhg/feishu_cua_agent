@@ -53,19 +53,20 @@ def verify_smoke_step(step: PlanStep, before: Observation | None, after: Observa
     if step.id == "focus_search":
         changed = _image_diff(before.screenshot_path if before else None, after.screenshot_path)
         dialog_visible = _search_dialog_visible(after.screenshot_path)
-        success = dialog_visible or changed > 2.0
+        search_ready = _search_dialog_ready(after.screenshot_path)
+        success = dialog_visible and search_ready and changed > 1.0
         return StepVerification(
             success=success,
             confidence=0.9 if success else 0.25,
             reason=(
-                f"Search dialog/input appears focused. image_diff={changed:.2f}."
+                f"Search dialog/input appears focused. image_diff={changed:.2f}, search_ready={search_ready}."
                 if success
-                else f"Search dialog/input focus was not detected. image_diff={changed:.2f}."
+                else f"Search dialog/input focus was not detected. image_diff={changed:.2f}, search_ready={search_ready}."
             ),
             matched_criteria=["search dialog or input focus detected"] if success else [],
             failed_criteria=[] if success else ["search dialog or input focus detected"],
             failure_category="none" if success else "verification_failed",
-            raw_model_output={"provider": "local_smoke", "image_diff": round(changed, 3), "search_dialog_visible": dialog_visible},
+            raw_model_output={"provider": "local_smoke", "image_diff": round(changed, 3), "search_dialog_visible": dialog_visible, "search_ready": search_ready},
         )
 
     if step.id == "type_safe_query":
@@ -77,7 +78,10 @@ def verify_smoke_step(step: PlanStep, before: Observation | None, after: Observa
         )
         changed = _crop_diff(before.screenshot_path if before else None, after.screenshot_path, box)
         has_input_marks = _input_crop_has_text_like_pixels(after.screenshot_path, box)
-        success = changed > 1.0 and has_input_marks
+        # Real Feishu's global search input often renders with a low mean diff
+        # after paste, especially for short queries. If text-like strokes are
+        # present, use the same conservative threshold as the guarded IM path.
+        success = (changed > 0.5 and has_input_marks) or changed > 2.0
         return StepVerification(
             success=success,
             confidence=0.9 if success else 0.25,
@@ -182,6 +186,16 @@ def _search_dialog_visible(path: str) -> bool:
     crop = image.crop((160, 235, 1115, 1065))
     stat = ImageStat.Stat(crop)
     return stat.mean[0] > 180 and stat.stddev[0] > 15
+
+
+def _search_dialog_ready(path: str) -> bool:
+    dynamic_box = strategy_bbox_from_screenshot(path, "search_dialog_input")
+    if dynamic_box is None:
+        return False
+    box = (dynamic_box.x1, dynamic_box.y1, dynamic_box.x2, dynamic_box.y2)
+    crop = Image.open(path).convert("L").crop(box)
+    stat = ImageStat.Stat(crop)
+    return stat.mean[0] > 170 and stat.stddev[0] > 5
 
 
 def _input_crop_has_text_like_pixels(path: str, box: tuple[int, int, int, int]) -> bool:

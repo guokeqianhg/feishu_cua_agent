@@ -13,14 +13,27 @@ logger = RunLogger()
 writer = ReportWriter()
 
 
+def _is_hidden_optional_skip(record) -> bool:
+    if record.status != "skipped":
+        return False
+    if record.action not in {"conditional_click", "conditional_hotkey"}:
+        return False
+    if record.user_decision == "skip":
+        return False
+    if not record.action_result or not record.action_result.skipped:
+        return False
+    return True
+
+
 def report_node(state: AgentState) -> AgentState:
     ended_at = time.time()
     state.ended_at = ended_at
-    passed = sum(1 for item in state.step_records if item.status == "pass")
-    failed = sum(1 for item in state.step_records if item.status in ("fail", "error", "aborted"))
-    skipped = sum(1 for item in state.step_records if item.status == "skipped")
-    total = len(state.step_records)
-    evidence_complete = all(item.before_screenshot and item.after_screenshot for item in state.step_records)
+    visible_step_records = [item for item in state.step_records if not _is_hidden_optional_skip(item)]
+    passed = sum(1 for item in visible_step_records if item.status == "pass")
+    failed = sum(1 for item in visible_step_records if item.status in ("fail", "error", "aborted"))
+    skipped = sum(1 for item in visible_step_records if item.status == "skipped")
+    total = len(visible_step_records)
+    evidence_complete = all(item.before_screenshot and item.after_screenshot for item in visible_step_records)
     screenshot_warning = any("Screenshot warning" in item for item in state.warnings)
     if screenshot_warning:
         evidence_complete = False
@@ -45,7 +58,8 @@ def report_node(state: AgentState) -> AgentState:
 
     stopped = f" Stopped at step={state.aborted_step_id}." if state.status == "aborted" and state.aborted_step_id else ""
     summary = (
-        f"Run {state.status}: {passed}/{total} steps passed, {skipped} skipped. "
+        f"Run {state.status}: {passed}/{total} steps passed"
+        f"{f', {skipped} skipped' if skipped else ''}. "
         f"Product={product}. Evidence complete={evidence_complete}."
         f"{stopped}"
     )
@@ -81,7 +95,7 @@ def report_node(state: AgentState) -> AgentState:
         ended_at=ended_at,
         duration_seconds=ended_at - state.started_at,
         metrics=metrics,
-        step_records=state.step_records,
+        step_records=visible_step_records,
         artifacts_dir=state.artifacts_dir,
         summary=summary,
         failure_category=state.failure_category,

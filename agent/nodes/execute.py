@@ -23,6 +23,8 @@ def _abort_requested() -> bool:
 
 def _is_lark_title(title: str) -> bool:
     raw = (title or "").lower()
+    if _is_known_non_lark_host_title(raw):
+        return False
     return any(keyword.lower() in raw for keyword in ("飞书", "feishu", "lark"))
 
 
@@ -37,7 +39,24 @@ def _foreground_keywords(step: PlanStep) -> list[str]:
 
 def _title_matches_keywords(title: str, keywords: list[str]) -> bool:
     raw = (title or "").lower()
+    if _is_known_non_lark_host_title(raw):
+        return False
     return any(keyword.lower() in raw for keyword in keywords)
+
+
+def _is_known_non_lark_host_title(raw_title: str) -> bool:
+    return any(
+        item in raw_title
+        for item in (
+            "visual studio code",
+            "powershell",
+            "windows terminal",
+            "cmd.exe",
+            "chatgpt",
+            "google gemini",
+            "github",
+        )
+    )
 
 
 def _needs_focus(step: PlanStep, dry_run: bool | None) -> bool:
@@ -66,6 +85,7 @@ def _preview_text(state: AgentState, mode: str = "manual") -> str:
     if step is None:
         return "No current step."
     warnings = target.warnings if target else []
+    will_refocus = _will_refocus_before_execute(step, active_title, state.dry_run)
     return "\n".join(
         [
             "",
@@ -83,7 +103,7 @@ def _preview_text(state: AgentState, mode: str = "manual") -> str:
             f"- warnings: {warnings}",
             f"- recommended_action: {target.recommended_action if target else 'continue'}",
             f"- active_window_title: {active_title}",
-            f"- will_refocus_before_execute: {_needs_focus(step, state.dry_run)}",
+            f"- will_refocus_before_execute: {will_refocus}",
             f"- before_screenshot: {before}",
             "请选择: y=继续, n=跳过, q=终止, c x y=使用手动坐标执行本步"
             if mode == "manual"
@@ -512,6 +532,7 @@ def _vc_state_precheck(state: AgentState, step: PlanStep) -> ActionResult | None
         "click_vc_start_meeting",
         "click_vc_join_meeting",
         "type_vc_meeting_id",
+        "type_vc_meeting_title",
         "allow_vc_permission",
         "set_vc_camera_state",
         "set_vc_mic_state",
@@ -566,11 +587,30 @@ def _focus_before_execute(state: AgentState, step: PlanStep) -> ActionResult | N
         return None
 
     keywords = _foreground_keywords(step)
+    active_title_before = window.get_active_window_title()
+    if step.metadata.get("focus_vc_meeting"):
+        already_focused = _title_matches_keywords(
+            active_title_before,
+            ["飞书会议", "Feishu Meeting", "Lark Meeting"],
+        )
+    else:
+        already_focused = _title_matches_keywords(active_title_before, keywords) if keywords else _is_lark_title(active_title_before)
+    if already_focused:
+        logger.log(
+            state,
+            "execute",
+            "Foreground window already matches before action",
+            step_id=step.id,
+            foreground_window_keywords=keywords,
+            active_window_title=active_title_before,
+        )
+        return None
+
     if step.metadata.get("focus_vc_meeting"):
         focused = window.focus_lark_meeting()
     else:
         focused = window.focus_window_by_keywords(keywords) if keywords else window.focus_lark()
-    active_title = window.get_active_window_title()
+    active_title_after = window.get_active_window_title()
     logger.log(
         state,
         "execute",
@@ -578,14 +618,18 @@ def _focus_before_execute(state: AgentState, step: PlanStep) -> ActionResult | N
         step_id=step.id,
         focused_lark=focused,
         foreground_window_keywords=keywords,
-        active_window_title=active_title,
+        active_window_title_before=active_title_before,
+        active_window_title=active_title_after,
     )
-    if focused or (_title_matches_keywords(active_title, keywords) if keywords else _is_lark_title(active_title)):
+    if step.metadata.get("focus_vc_meeting"):
+        if focused or _title_matches_keywords(active_title_after, ["飞书会议", "Feishu Meeting", "Lark Meeting"]):
+            return None
+    elif focused or (_title_matches_keywords(active_title_after, keywords) if keywords else _is_lark_title(active_title_after)):
         return None
 
     message = (
         "Refocus target window before action failed. "
-        f"Active window is {active_title!r}. Action was blocked to avoid operating the wrong window."
+        f"Active window is {active_title_after!r}. Action was blocked to avoid operating the wrong window."
     )
     return ActionResult(
         success=False,
@@ -597,6 +641,15 @@ def _focus_before_execute(state: AgentState, step: PlanStep) -> ActionResult | N
         hotkeys=step.hotkeys,
         error_message=message,
     )
+
+
+def _will_refocus_before_execute(step: PlanStep, active_title: str, dry_run: bool | None) -> bool:
+    if not _needs_focus(step, dry_run):
+        return False
+    keywords = _foreground_keywords(step)
+    if step.metadata.get("focus_vc_meeting"):
+        return not _title_matches_keywords(active_title, ["飞书会议", "Feishu Meeting", "Lark Meeting"])
+    return not (_title_matches_keywords(active_title, keywords) if keywords else _is_lark_title(active_title))
 
 
 def execute_node(state: AgentState) -> AgentState:

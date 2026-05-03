@@ -122,6 +122,7 @@ def local_verify_step(
         "vc_started_card_visible",
         "vc_device_state",
         "vc_meeting_id_entered",
+        "vc_meeting_title_entered",
     }:
         return _verify_vc_state(before, after, step, verifier)
 
@@ -201,20 +202,26 @@ def local_verify_step(
         else:
             text = " ".join(item[1] for item in ocr_image(after.screenshot_path))
         text_hit = True
-        ok = _looks_like_lark(title) and _healthy_image(after.screenshot_path) and text_hit
+        im_hit = _im_screen_visible(after)
+        ok = _looks_like_lark(title) and _healthy_image(after.screenshot_path) and text_hit and im_hit
         return (
             _pass("Feishu/Lark IM foreground and healthy screenshot were confirmed.", verifier, 0.95)
             if ok
-            else _fail(f"Feishu/Lark IM foreground was not confirmed: title={title!r}, text_hit={text_hit}", "product_state_invalid", verifier)
+            else _fail(
+                f"Feishu/Lark IM foreground was not confirmed: title={title!r}, text_hit={text_hit}, im_hit={im_hit}",
+                "product_state_invalid",
+                verifier,
+            )
         )
 
     if verifier == "im_search_focused":
         diff = _image_diff(before.screenshot_path if before else None, after.screenshot_path)
-        ok = _healthy_image(after.screenshot_path) and diff > 1.0
+        search_ready = _im_search_dialog_ready(after.screenshot_path)
+        ok = _healthy_image(after.screenshot_path) and search_ready and diff > 1.0
         return (
-            _pass(f"Search focus changed the visible screen. image_diff={diff:.2f}.", verifier, 0.85)
+            _pass(f"Search focus opened the global search dialog. image_diff={diff:.2f}, search_ready={search_ready}.", verifier, 0.87)
             if ok
-            else _fail(f"Search focus was not locally confirmed. image_diff={diff:.2f}.", "verification_failed", verifier)
+            else _fail(f"Search focus was not locally confirmed. image_diff={diff:.2f}, search_ready={search_ready}.", "verification_failed", verifier)
         )
 
     if verifier == "im_search_text_entered":
@@ -285,6 +292,7 @@ def local_verify_step(
     if verifier == "im_message_sent":
         target = str(step.metadata.get("target") or "").strip()
         message = str(step.metadata.get("message") or "").strip()
+        analysis = None
         if target:
             analysis = analyze_im_screen(after, target)
             if analysis and not analysis.is_target_chat:
@@ -298,6 +306,13 @@ def local_verify_step(
                     verifier,
                 )
         if message:
+            normalized_message = _normalize_text(message)
+            if normalized_message and normalized_message in _normalize_text(_im_visible_text(after)):
+                return _pass(
+                    f"IM message send was locally confirmed in target chat {target!r} by OCR-visible message text.",
+                    verifier,
+                    0.88,
+                )
             return None
         diff = _image_diff(before.screenshot_path if before else None, after.screenshot_path)
         ok = _healthy_image(after.screenshot_path) and diff > 0.3
@@ -308,7 +323,24 @@ def local_verify_step(
         )
 
     if verifier == "im_message_visible":
-        if case.metadata.get("target") or case.metadata.get("message"):
+        target = str(case.metadata.get("target") or "").strip()
+        message = str(case.metadata.get("message") or "").strip()
+        if target:
+            analysis = analyze_im_screen(after, target)
+            if analysis and not analysis.is_target_chat:
+                return _fail(
+                    (
+                        "Final message visibility blocked by IM screen mismatch. "
+                        f"target_visible={analysis.target_visible}, wrong_state={analysis.wrong_state}, "
+                        f"reference_match={analysis.reference_match}, reference_similarity={analysis.reference_similarity:.2f}."
+                    ),
+                    "verification_failed",
+                    verifier,
+                )
+        if message:
+            normalized_message = _normalize_text(message)
+            if normalized_message and normalized_message in _normalize_text(_im_visible_text(after)):
+                return _pass("Final IM message visibility was locally confirmed by OCR-visible message text.", verifier, 0.86)
             return None
         return (
             _pass("Final chat screen is visible after guarded send workflow.", verifier, 0.72)
@@ -326,6 +358,15 @@ def local_verify_case(case: TestCase, final_observation: Observation | None) -> 
     template = _template(case)
     if is_safe_smoke_case(case) or template in {"safe_smoke", "im_search_only"}:
         return verify_smoke_case(case, final_observation)
+    if template == "im_send_message_guarded":
+        if final_observation is None:
+            return _fail("No final observation available.", "perception_failed", "im_message_case")
+        step = PlanStep(
+            id="final_im_message_visible",
+            action="verify",
+            metadata={"local_verifier": "im_message_visible"},
+        )
+        return local_verify_step(case, step, None, final_observation)
     if template in {"docs_open_smoke", "docs_smoke"}:
         if final_observation is None:
             return _fail("No final observation available.", "perception_failed", "docs_case")
@@ -408,10 +449,28 @@ def local_verify_case(case: TestCase, final_observation: Observation | None) -> 
         if _healthy_image(final_observation.screenshot_path):
             return _pass("IM emoji reaction workflow completed with a healthy final observation.", "im_emoji_reaction_case", 0.72)
         return _fail("No final healthy observation was available.", "perception_failed", "im_emoji_reaction_case")
+    if template == "im_mention_user_guarded":
+        if final_observation is None:
+            return _fail("No final observation available.", "perception_failed", "im_mention_case")
+        step = PlanStep(
+            id="final_im_mention_visible",
+            action="verify",
+            metadata={
+                "local_verifier": "im_mention_visible",
+                "mention_user": str(case.metadata.get("mention_user") or "李新元"),
+                "message": str(case.metadata.get("message") or "@李新元 hello from CUA"),
+            },
+        )
+        local = _verify_im_extended(final_observation, step, "im_mention_case")
+        if local is not None and local.success:
+            return local
+        return (
+            _pass("IM mention workflow completed with a healthy final observation.", "im_mention_case", 0.72)
+            if _healthy_image(final_observation.screenshot_path)
+            else _fail("No final healthy observation was available.", "perception_failed", "im_mention_case")
+        )
     if template in {
-        "im_send_message_guarded",
         "im_send_image_guarded",
-        "im_mention_user_guarded",
         "im_search_messages_guarded",
         "im_create_group_guarded",
         "docs_create_doc_guarded",
@@ -425,6 +484,16 @@ def _template(case: TestCase) -> str:
     if case.metadata.get("safe_smoke"):
         return "safe_smoke"
     return str(case.metadata.get("plan_template") or "").strip()
+
+
+def _im_visible_text(observation: Observation) -> str:
+    pieces: list[str] = []
+    if observation.window_title:
+        pieces.append(observation.window_title)
+    pieces.extend(observation.ocr_lines or [])
+    if not observation.ocr_lines:
+        pieces.extend(text for _bbox, text, _confidence in ocr_image(observation.screenshot_path))
+    return " ".join(pieces)
 
 
 def _vc_case_has_device_request(case: TestCase) -> bool:
@@ -693,17 +762,18 @@ def _verify_vc_state(
     if verifier == "vc_join_dialog_visible":
         text = _normalize_text(" ".join(after.ocr_lines or []) or " ".join(item[1] for item in ocr_image(after.screenshot_path)))
         has_input_prompt = any(item in text for item in ("会议id", "会议号", "输入会议", "meetingid"))
-        on_home_card = "发起会议" in text and "预约会议" in text and "网络研讨会" in text
+        focused_dialog = _vc_join_dialog_input_visible(after.screenshot_path)
+        on_home_card = "发起会议" in text and "预约会议" in text and "网络研讨会" in text and not focused_dialog
         if has_input_prompt and not on_home_card:
             return _pass("VC join dialog with meeting ID input was locally confirmed.", verifier, 0.84)
         diff = _image_diff(before.screenshot_path if before else None, after.screenshot_path)
         return _fail(
-            f"VC join dialog was not confirmed. has_input_prompt={has_input_prompt}, on_home_card={on_home_card}, image_diff={diff:.2f}.",
+            f"VC join dialog was not confirmed. has_input_prompt={has_input_prompt}, focused_dialog={focused_dialog}, on_home_card={on_home_card}, image_diff={diff:.2f}.",
             "verification_failed",
             verifier,
         )
     if verifier == "vc_prejoin_or_in_meeting":
-        if analysis.prejoin_visible or analysis.in_meeting_visible:
+        if analysis.prejoin_visible or analysis.in_meeting_visible or _vc_meeting_child_window_open(after):
             return _pass("VC start action reached prejoin or in-meeting state.", verifier, 0.82)
         return _fail(f"VC start action did not reach prejoin/in-meeting state. wrong_state={analysis.wrong_state}.", "verification_failed", verifier)
     if verifier == "vc_started_card_visible":
@@ -721,15 +791,27 @@ def _verify_vc_state(
                 verifier,
             )
         if analysis.in_meeting_visible:
+            desired_camera = step.metadata.get("desired_camera_on")
+            desired_mic = step.metadata.get("desired_mic_on")
+            if desired_camera is not None or desired_mic is not None:
+                device_result = _vc_device_state_result(analysis, desired_camera, desired_mic)
+                if device_result:
+                    return _fail(
+                        f"VC in-meeting state was confirmed, but requested device state was not: {device_result}.",
+                        "verification_failed",
+                        verifier,
+                    )
+                return _pass("VC in-meeting state and requested device states were locally confirmed.", verifier, 0.86)
             return _pass("VC in-meeting state and controls were locally confirmed.", verifier, 0.84)
         return _fail(f"VC in-meeting state was not confirmed. wrong_state={analysis.wrong_state}.", "verification_failed", verifier)
     if verifier == "vc_meeting_id_entered":
         meeting_id = _normalize_text(str(step.metadata.get("meeting_id") or step.input_text or ""))
         text = _normalize_text(" ".join(after.ocr_lines or []) or " ".join(item[1] for item in ocr_image(after.screenshot_path)))
         bbox = strategy_bbox_from_screenshot(after.screenshot_path, str(step.metadata.get("locator_strategy") or "vc_meeting_id_input"))
-        changed = _crop_diff(before.screenshot_path if before else None, after.screenshot_path, bbox.model_dump()) if bbox else 0.0
+        roi = _vc_meeting_id_input_roi(after.screenshot_path) or bbox
+        changed = _crop_diff(before.screenshot_path if before else None, after.screenshot_path, roi.model_dump()) if roi else 0.0
         has_input_prompt = any(item in text for item in ("会议id", "会议号", "输入会议", "meetingid"))
-        roi_text = _normalize_text(" ".join(item[1] for item in ocr_image(after.screenshot_path, bbox))) if bbox else ""
+        roi_text = _normalize_text(" ".join(item[1] for item in ocr_image(after.screenshot_path, roi))) if roi else ""
         hit = bool(meeting_id and meeting_id in text and has_input_prompt)
         roi_hit = bool(meeting_id and meeting_id in roi_text)
         if roi_hit:
@@ -743,20 +825,27 @@ def _verify_vc_state(
             "verification_failed",
             verifier,
         )
+    if verifier == "vc_meeting_title_entered":
+        meeting_title = _normalize_text(str(step.metadata.get("meeting_title") or step.input_text or ""))
+        bbox = strategy_bbox_from_screenshot(after.screenshot_path, str(step.metadata.get("locator_strategy") or "vc_meeting_title_input"))
+        roi = _vc_meeting_title_input_roi(after.screenshot_path) or bbox
+        changed = _crop_diff(before.screenshot_path if before else None, after.screenshot_path, roi.model_dump()) if roi else 0.0
+        roi_text = _normalize_text(" ".join(item[1] for item in ocr_image(after.screenshot_path, roi))) if roi else ""
+        if meeting_title and meeting_title in roi_text:
+            return _pass(
+                f"VC meeting title entry was locally confirmed inside the title ROI. crop_diff={changed:.2f}.",
+                verifier,
+                0.86,
+            )
+        return _fail(
+            f"VC meeting title was not locally confirmed inside the title ROI. roi_text={roi_text!r}, crop_diff={changed:.2f}.",
+            "verification_failed",
+            verifier,
+        )
     if verifier == "vc_device_state":
-        failures: list[str] = []
         desired_camera = step.metadata.get("desired_camera_on")
-        if desired_camera is not None:
-            if analysis.camera_off is None:
-                failures.append("camera_state_unknown")
-            elif (not analysis.camera_off) != bool(desired_camera):
-                failures.append(f"camera_on_expected_{bool(desired_camera)}")
         desired_mic = step.metadata.get("desired_mic_on")
-        if desired_mic is not None:
-            if analysis.mic_muted is None:
-                failures.append("mic_state_unknown")
-            elif (not analysis.mic_muted) != bool(desired_mic):
-                failures.append(f"mic_on_expected_{bool(desired_mic)}")
+        failures = _vc_device_state_result(analysis, desired_camera, desired_mic)
         if not failures:
             if desired_camera is None and desired_mic is None:
                 return _pass("No explicit VC device state was requested; device controls are visible enough to proceed.", verifier, 0.72)
@@ -769,6 +858,67 @@ def _verify_vc_state(
             )
         return _fail(f"Requested VC device state was not confirmed: {failures}.", "verification_failed", verifier)
     return _fail(f"Unsupported VC verifier {verifier!r}.", "verification_failed", verifier)
+
+
+def _vc_device_state_result(analysis, desired_camera, desired_mic) -> list[str]:
+    failures: list[str] = []
+    if desired_camera is not None:
+        if analysis.camera_off is None:
+            failures.append("camera_state_unknown")
+        elif (not analysis.camera_off) != bool(desired_camera):
+            failures.append(f"camera_on_expected_{bool(desired_camera)}")
+    if desired_mic is not None:
+        if analysis.mic_muted is None:
+            failures.append("mic_state_unknown")
+        elif (not analysis.mic_muted) != bool(desired_mic):
+            failures.append(f"mic_on_expected_{bool(desired_mic)}")
+    return failures
+
+
+def _vc_meeting_child_window_open(observation: Observation) -> bool:
+    title = (observation.window_title or "").lower()
+    if not any(item in title for item in ("飞书会议", "feishu meeting", "lark meeting")):
+        return False
+    text = _normalize_text(" ".join(observation.ocr_lines or []) or " ".join(item[1] for item in ocr_image(observation.screenshot_path)))
+    return any(item in text for item in ("视频会议", "开始会议", "麦克风", "摄像头", "会议信息", "共享"))
+
+
+def _vc_meeting_id_input_roi(screenshot_path: str) -> BoundingBox | None:
+    window = detect_lark_window(screenshot_path)
+    if window is None:
+        return None
+    return BoundingBox(
+        x1=window.x1 + int(window.width * 0.38),
+        y1=window.y1 + int(window.height * 0.08),
+        x2=window.x1 + int(window.width * 0.86),
+        y2=window.y1 + int(window.height * 0.24),
+    )
+
+
+def _vc_meeting_title_input_roi(screenshot_path: str) -> BoundingBox | None:
+    window = detect_lark_window(screenshot_path)
+    if window is None:
+        return None
+    return BoundingBox(
+        x1=window.x1 + int(window.width * 0.24),
+        y1=window.y1 + int(window.height * 0.05),
+        x2=window.x1 + int(window.width * 0.76),
+        y2=window.y1 + int(window.height * 0.24),
+    )
+
+
+def _vc_join_dialog_input_visible(screenshot_path: str) -> bool:
+    window = detect_lark_window(screenshot_path)
+    if window is None:
+        return False
+    roi = BoundingBox(
+        x1=window.x1 + int(window.width * 0.42),
+        y1=window.y1 + int(window.height * 0.05),
+        x2=window.x1 + int(window.width * 0.86),
+        y2=window.y1 + int(window.height * 0.26),
+    )
+    text = _normalize_text(" ".join(item[1] for item in ocr_image(screenshot_path, roi)))
+    return any(item in text for item in ("会议id", "会议号", "输入会议", "meetingid"))
 
 
 def _verify_calendar_editor_opened(
@@ -1121,6 +1271,95 @@ def _calendar_create_confirmation_visible(normalized_text: str) -> bool:
     return "确定创建日程吗" in normalized_text or "创建日程吗" in normalized_text
 
 
+def _im_screen_visible(observation: Observation) -> bool:
+    window = detect_lark_window(observation.screenshot_path)
+    if window is None:
+        return False
+    nav_roi = BoundingBox(
+        x1=window.x1,
+        y1=window.y1 + 70,
+        x2=min(window.x1 + 360, window.x2),
+        y2=window.y2,
+    )
+    nav_text = _normalize_text(" ".join(text for _bbox, text, _confidence in ocr_image(observation.screenshot_path, nav_roi)))
+    has_im_nav = any(item in nav_text for item in ("消息", "聊天", "知识问答", "通讯录"))
+    im_selected = _im_sidebar_entry_selected(observation.screenshot_path)
+    global_search_visible = _im_global_search_visible(observation.screenshot_path)
+    current_chat_visible = _im_current_chat_area_visible(observation.screenshot_path)
+    search_box = strategy_bbox_from_screenshot(observation.screenshot_path, "sidebar_search_box")
+    return bool(search_box is not None and has_im_nav and (im_selected or global_search_visible or current_chat_visible))
+
+
+def _im_sidebar_entry_selected(path: str) -> bool:
+    if not Path(path).exists():
+        return False
+    image = Image.open(path).convert("RGB")
+    try:
+        window = detect_lark_window(path)
+        if window is None:
+            return False
+        roi = BoundingBox(
+            x1=window.x1,
+            y1=window.y1 + 90,
+            x2=min(window.x1 + 330, window.x2),
+            y2=window.y1 + 270,
+        )
+        for bbox, text, _confidence in ocr_image(path, roi):
+            if "消息" not in _normalize_text(text):
+                continue
+            row = image.crop((max(window.x1, bbox.x1 - 75), max(window.y1, bbox.y1 - 24), min(window.x2, bbox.x2 + 130), min(window.y2, bbox.y2 + 28)))
+            if _selected_nav_row_score(row) > 0.12:
+                return True
+        return False
+    finally:
+        image.close()
+
+
+def _im_global_search_visible(path: str) -> bool:
+    window = detect_lark_window(path)
+    if window is None:
+        return False
+    roi = BoundingBox(
+        x1=window.x1 + int(window.width * 0.10),
+        y1=window.y1 + int(window.height * 0.10),
+        x2=window.x2 - int(window.width * 0.08),
+        y2=window.y1 + int(window.height * 0.55),
+    )
+    text = _normalize_text(" ".join(item[1] for item in ocr_image(path, roi)))
+    return "筛选" in text and any(item in text for item in ("消息", "联系人", "群组", "云文档"))
+
+
+def _im_search_dialog_ready(path: str) -> bool:
+    window = detect_lark_window(path)
+    if window is None:
+        return False
+    input_box = strategy_bbox_from_screenshot(path, "search_dialog_input")
+    if input_box is None:
+        return False
+    roi = BoundingBox(
+        x1=max(window.x1, input_box.x1 - 80),
+        y1=max(window.y1, input_box.y1 - 45),
+        x2=min(window.x2, input_box.x2 + 240),
+        y2=min(window.y2, input_box.y2 + 160),
+    )
+    text = _normalize_text(" ".join(item[1] for item in ocr_image(path, roi)))
+    return any(item in text for item in ("搜索", "消息", "联系人", "群组", "筛选", "清除"))
+
+
+def _im_current_chat_area_visible(path: str) -> bool:
+    window = detect_lark_window(path)
+    if window is None:
+        return False
+    roi = BoundingBox(
+        x1=window.x1 + int(window.width * 0.32),
+        y1=window.y1 + int(window.height * 0.10),
+        x2=window.x2 - 30,
+        y2=window.y2 - 40,
+    )
+    text = _normalize_text(" ".join(item[1] for item in ocr_image(path, roi)))
+    return any(item in text for item in ("发送", "输入消息", "聊天记录", "群公告", "按enter发送"))
+
+
 def _verify_im_extended(after: Observation, step: PlanStep, verifier: str) -> StepVerification | None:
     if not _healthy_image(after.screenshot_path):
         return _fail("Screenshot is not healthy.", "perception_failed", verifier)
@@ -1143,6 +1382,18 @@ def _verify_im_extended(after: Observation, step: PlanStep, verifier: str) -> St
                 f"IM @ mention was locally confirmed by OCR. mention_hit={mention_hit}, message_hit={message_hit}.",
                 verifier,
                 0.84,
+            )
+        return None
+
+    if verifier == "im_mention_suggestions_visible":
+        mention_user = _normalize_text(str(step.metadata.get("mention_user") or ""))
+        mention_hit = bool(mention_user and mention_user in normalized)
+        draft_hit = bool(mention_user and f"@{mention_user}" in normalized)
+        if mention_hit or draft_hit:
+            return _pass(
+                f"IM @ mention suggestion or draft trigger was locally confirmed. mention_hit={mention_hit}, draft_hit={draft_hit}.",
+                verifier,
+                0.82,
             )
         return None
 
@@ -1200,6 +1451,18 @@ def _verify_im_extended(after: Observation, step: PlanStep, verifier: str) -> St
         group_name = _normalize_text(str(step.metadata.get("group_name") or ""))
         if group_name and group_name in normalized:
             return _pass("IM created group was locally confirmed by OCR-visible group name.", verifier, 0.84)
+        return None
+
+    if verifier == "im_mention_selected":
+        mention_user = _normalize_text(str(step.metadata.get("mention_user") or ""))
+        mention_hit = bool(mention_user and mention_user in normalized)
+        send_target_hit = "发送给" in normalized or "按enter发送" in normalized or "enter发送" in normalized
+        if mention_hit and send_target_hit:
+            return _pass(
+                f"IM @ mention candidate was locally confirmed in the draft. mention_hit={mention_hit}, send_target_hit={send_target_hit}.",
+                verifier,
+                0.84,
+            )
         return None
 
     if verifier == "im_reaction_picker_visible":

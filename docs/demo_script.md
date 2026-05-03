@@ -4,7 +4,7 @@
 
 ```powershell
 conda activate agent
-cd D:\找工作\feishu_cua_agent\backend
+cd path\to\feishu_cua_agent
 python cli.py screenshot-diagnostics --configured-only
 python cli.py inspect-screen
 ```

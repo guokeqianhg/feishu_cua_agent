@@ -137,6 +137,9 @@ def _apply_calendar_error_recovery(state: AgentState) -> None:
     step = state.current_step()
     if step is None or state.plan is None:
         return
+    template = str(state.test_case.metadata.get("plan_template") or "")
+    if not template.startswith("calendar_"):
+        return
     analysis = analyze_calendar_screen(
         state.after_observation,
         expected_title=str(step.metadata.get("event_title") or ""),
@@ -210,11 +213,13 @@ def _apply_vc_error_recovery(state: AgentState) -> None:
     if analysis is None:
         return
     wrong_state = analysis.wrong_state
+    if wrong_state is None and step.id == "click_vc_join_meeting" and analysis.vc_home_visible and not analysis.join_dialog_visible:
+        wrong_state = "vc_home_not_join_dialog"
     if wrong_state is None and step.id == "type_vc_meeting_id":
         wrong_state = "meeting_id_not_entered"
     if wrong_state is None:
         return
-    recover_to = _vc_recover_step_id(step.id, wrong_state)
+    recover_to = _vc_recover_step_id(step.id, wrong_state, template)
     if not recover_to:
         return
     route_key = f"{step.id}->{recover_to}:{wrong_state}"
@@ -247,21 +252,30 @@ def _apply_vc_error_recovery(state: AgentState) -> None:
         return
 
 
-def _vc_recover_step_id(step_id: str, wrong_state: str) -> str | None:
+def _vc_recover_step_id(step_id: str, wrong_state: str, template: str = "") -> str | None:
     if wrong_state == "not_vc_screen":
         return "open_vc"
-    if wrong_state == "permission_prompt_open":
+    if wrong_state in {"permission_popup", "permission_prompt_open"}:
         return "allow_vc_permission"
-    if wrong_state == "meeting_id_not_entered":
+    if wrong_state == "account_switch_modal":
+        return "dismiss_vc_account_modal"
+    if wrong_state == "vc_home_not_join_dialog":
+        if template == "vc_join_meeting_guarded" and step_id == "click_vc_join_meeting":
+            return "type_vc_meeting_id"
+        return "click_vc_join_meeting" if template == "vc_join_meeting_guarded" else "click_vc_start_meeting"
+    if wrong_state in {"meeting_id_not_entered", "join_button_disabled"}:
         return "type_vc_meeting_id"
-    if wrong_state == "prejoin_not_confirmed":
+    if wrong_state in {"prejoin_not_in_meeting", "prejoin_not_confirmed"}:
         if step_id.startswith("confirm_"):
             return step_id
         return "confirm_join_meeting"
     if wrong_state == "meeting_not_joined":
         if step_id in {"confirm_start_meeting", "confirm_join_meeting"}:
             return step_id
-        return "click_vc_start_meeting"
+        return "click_vc_join_meeting" if template == "vc_join_meeting_guarded" else "click_vc_start_meeting"
+    if wrong_state == "meeting_window_not_foreground":
+        return "focus_lark"
     if wrong_state == "device_controls_missing":
-        return "verify_vc_started" if step_id != "verify_vc_started" else None
+        verify_step = "verify_vc_joined" if template == "vc_join_meeting_guarded" else "verify_vc_started"
+        return verify_step if step_id != verify_step else None
     return None

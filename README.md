@@ -62,6 +62,14 @@ $env:CUA_LARK_MODEL_PROVIDER="auto"
 python -B cli.py run --product im --instruction "在测试群发送消息「hello from CUA」" --show-intent
 ```
 
+测试案例：
+```powershell
+python -B cli.py run --product im --instruction "在测试群发送消息「hello from CUA」" --show-intent
+python -B cli.py run --product docs --instruction "新建一个标题为「测试文档」的云文档，正文为「hello docs」" --show-intent
+python -B cli.py run --product calendar --instruction "创建一个标题为「测试会议」的日程，时间为明天10:00，参会人为李新元" --show-intent
+python -B cli.py run --product vc --instruction "发起一个名为「最终测试」的视频会议，并打开摄像头和麦克风" --show-intent
+```
+
 如果只想 dry-run，不真实点击飞书桌面：
 
 ```powershell

@@ -1373,7 +1373,7 @@ def _calendar_create_event_guarded_plan(case: TestCase) -> TestPlan:
             target_description="Feishu/Lark desktop window after stale Calendar editor cleanup",
             expected_state="Feishu/Lark is foreground before Calendar sidebar navigation.",
             retry_limit=1,
-            metadata={"local_verifier": "lark_focused", "foreground_window_keywords": ["飞书", "Feishu", "Lark"]},
+            metadata={"local_verifier": "lark_focused"},
         ),
         PlanStep(
             id="open_calendar",
@@ -2318,10 +2318,13 @@ def _vc_join_meeting_guarded_plan(case: TestCase) -> TestPlan:
 
 def _vc_toggle_devices_guarded_plan(case: TestCase) -> TestPlan:
     steps = [
-        _vc_focus_meeting_window_step(
-            "focus_vc_meeting",
-            "vc_in_meeting",
-            "The Feishu meeting child window is foreground before device control.",
+        PlanStep(
+            id="verify_vc_toggle_controls_visible",
+            action="verify",
+            target_description="floating Feishu meeting device controls",
+            expected_state="The floating meeting device controls are visible before toggling.",
+            retry_limit=1,
+            metadata={"local_verifier": "vc_device_state", "vc_device_state_scope": "toggle", "preserve_foreground": True},
         ),
         PlanStep(
             id="verify_vc_in_meeting_before_toggle",
@@ -2329,10 +2332,10 @@ def _vc_toggle_devices_guarded_plan(case: TestCase) -> TestPlan:
             target_description="video meeting room",
             expected_state="The video meeting is active before toggling devices.",
             retry_limit=1,
-            metadata={"local_verifier": "vc_in_meeting", "preserve_foreground": True},
+            metadata={"local_verifier": "vc_device_state", "vc_device_state_scope": "toggle", "preserve_foreground": True},
         ),
     ]
-    steps.extend(_vc_device_steps(case, require_device_guard=True))
+    steps.extend(_vc_toggle_device_steps(case))
     return TestPlan(
         goal=case.instruction,
         product="vc",
@@ -2499,6 +2502,7 @@ def _vc_join_device_steps(case: TestCase) -> list[PlanStep]:
                     "desired_mic_on": bool(desired_mic),
                     "requires_vc_device_toggle_guard": True,
                     "dangerous_vc_device_toggle": False,
+                    "strict_vc_device_state": True,
                     "skip_if_vc_device_state_matches": True,
                     "preserve_foreground": True,
                     "wait_after_action_seconds": 1,
@@ -2549,6 +2553,57 @@ def _vc_start_device_steps(case: TestCase) -> list[PlanStep]:
                     "requires_vc_device_toggle_guard": True,
                     "dangerous_vc_device_toggle": False,
                     "skip_if_vc_device_state_matches": True,
+                    "preserve_foreground": True,
+                    "wait_after_action_seconds": 1,
+                },
+            )
+        )
+    return steps
+
+
+def _vc_toggle_device_steps(case: TestCase) -> list[PlanStep]:
+    steps: list[PlanStep] = []
+    desired_camera = case.metadata.get("desired_camera_on")
+    desired_mic = case.metadata.get("desired_mic_on")
+    if desired_camera is not None:
+        steps.append(
+            PlanStep(
+                id="set_vc_camera_state",
+                action="conditional_click",
+                target_description="floating meeting camera control",
+                expected_state=f"Camera is {'on' if desired_camera else 'off'}.",
+                retry_limit=2,
+                metadata={
+                    "local_verifier": "vc_device_state",
+                    "locator_strategy": "vc_toggle_camera_button",
+                    "locator_kind": "button",
+                    "desired_camera_on": bool(desired_camera),
+                    "requires_vc_device_toggle_guard": True,
+                    "dangerous_vc_device_toggle": True,
+                    "skip_if_vc_device_state_matches": True,
+                    "vc_device_state_scope": "toggle",
+                    "preserve_foreground": True,
+                    "wait_after_action_seconds": 1,
+                },
+            )
+        )
+    if desired_mic is not None:
+        steps.append(
+            PlanStep(
+                id="set_vc_mic_state",
+                action="conditional_click",
+                target_description="floating meeting microphone control",
+                expected_state=f"Microphone is {'on' if desired_mic else 'muted'}.",
+                retry_limit=2,
+                metadata={
+                    "local_verifier": "vc_device_state",
+                    "locator_strategy": "vc_toggle_microphone_button",
+                    "locator_kind": "button",
+                    "desired_mic_on": bool(desired_mic),
+                    "requires_vc_device_toggle_guard": True,
+                    "dangerous_vc_device_toggle": True,
+                    "skip_if_vc_device_state_matches": True,
+                    "vc_device_state_scope": "toggle",
                     "preserve_foreground": True,
                     "wait_after_action_seconds": 1,
                 },

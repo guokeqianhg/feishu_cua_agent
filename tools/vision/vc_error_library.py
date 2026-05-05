@@ -116,6 +116,20 @@ def analyze_vc_screen(observation: Observation | None) -> VCScreenState | None:
     )
 
 
+def analyze_vc_device_state(observation: Observation | None, *, scope: str | None = None) -> tuple[bool | None, bool | None]:
+    if observation is None:
+        return None, None
+    if scope == "toggle":
+        return (
+            _device_off_from_button_roi(observation, "vc_toggle_camera_button"),
+            _device_off_from_button_roi(observation, "vc_toggle_microphone_button"),
+        )
+    state = analyze_vc_screen(observation)
+    if state is None:
+        return None, None
+    return state.camera_off, state.mic_muted
+
+
 def _visible_vc_text(observation: Observation) -> str:
     pieces: list[str] = []
     if observation.window_title:

@@ -25,10 +25,38 @@ def _is_hidden_optional_skip(record) -> bool:
     return True
 
 
+def _is_hidden_recovered_failure(state: AgentState, record) -> bool:
+    if state.status != "pass":
+        return False
+    if record.status not in {"fail", "error"}:
+        return False
+    marker = f"Calendar recovery {record.step_id}->"
+    return any(str(warning).startswith(marker) for warning in state.warnings)
+
+
+def _is_hidden_retry_failure(state: AgentState, record, records) -> bool:
+    if state.status != "pass":
+        return False
+    if record.status not in {"fail", "error"}:
+        return False
+    return any(
+        item.step_id == record.step_id
+        and item.status == "pass"
+        and item.attempt > record.attempt
+        for item in records
+    )
+
+
 def report_node(state: AgentState) -> AgentState:
     ended_at = time.time()
     state.ended_at = ended_at
-    visible_step_records = [item for item in state.step_records if not _is_hidden_optional_skip(item)]
+    visible_step_records = [
+        item
+        for item in state.step_records
+        if not _is_hidden_optional_skip(item)
+        and not _is_hidden_recovered_failure(state, item)
+        and not _is_hidden_retry_failure(state, item, state.step_records)
+    ]
     passed = sum(1 for item in visible_step_records if item.status == "pass")
     failed = sum(1 for item in visible_step_records if item.status in ("fail", "error", "aborted"))
     skipped = sum(1 for item in visible_step_records if item.status == "skipped")

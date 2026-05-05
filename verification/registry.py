@@ -11,7 +11,7 @@ from tools.vision.docs_error_library import analyze_docs_screen
 from tools.vision.lark_locator import detect_lark_window, strategy_bbox_from_screenshot
 from tools.vision.im_error_library import analyze_im_screen
 from tools.vision.ocr_client import ocr_image
-from tools.vision.vc_error_library import analyze_vc_screen
+from tools.vision.vc_error_library import analyze_vc_device_state, analyze_vc_screen
 from tools.vision.vc_locator import vc_strategy_bbox_from_screenshot
 from tools.vision.smoke import (
     is_safe_smoke_case,
@@ -715,14 +715,18 @@ def _verify_vc_state(
     if not _healthy_image(after.screenshot_path):
         return _fail("VC screenshot is not healthy.", "perception_failed", verifier)
     analysis = analyze_vc_screen(after)
-    if analysis is None:
+    if analysis is None and verifier != "vc_device_state":
         return _fail("VC screen analysis was unavailable.", "perception_failed", verifier)
     diff = _image_diff(before.screenshot_path if before else None, after.screenshot_path)
     if verifier == "vc_visible":
+        if analysis is None:
+            return _fail("VC screen analysis was unavailable.", "perception_failed", verifier)
         if analysis.vc_visible:
             return _pass(f"VC screen was locally confirmed. image_diff={diff:.2f}.", verifier, 0.82)
         return _fail(f"VC screen was not locally confirmed. wrong_state={analysis.wrong_state}.", "product_state_invalid", verifier)
     if verifier == "vc_prejoin_visible":
+        if analysis is None:
+            return _fail("VC screen analysis was unavailable.", "perception_failed", verifier)
         if analysis.prejoin_visible or analysis.in_meeting_visible:
             return _pass("VC prejoin or in-meeting screen was locally confirmed.", verifier, 0.82)
         return _fail(f"VC prejoin screen was not confirmed. wrong_state={analysis.wrong_state}.", "verification_failed", verifier)
@@ -825,22 +829,27 @@ def _verify_vc_state(
         )
     if verifier == "vc_device_state":
         failures: list[str] = []
+        scoped_camera_off, scoped_mic_muted = analyze_vc_device_state(after, scope=str(step.metadata.get("vc_device_state_scope") or ""))
         desired_camera = step.metadata.get("desired_camera_on")
         if desired_camera is not None:
-            if analysis.camera_off is None:
+            camera_off = scoped_camera_off
+            if camera_off is None:
                 failures.append("camera_state_unknown")
-            elif (not analysis.camera_off) != bool(desired_camera):
+            elif (not camera_off) != bool(desired_camera):
                 failures.append(f"camera_on_expected_{bool(desired_camera)}")
         desired_mic = step.metadata.get("desired_mic_on")
         if desired_mic is not None:
-            if analysis.mic_muted is None:
+            mic_muted = scoped_mic_muted
+            if mic_muted is None:
                 failures.append("mic_state_unknown")
-            elif (not analysis.mic_muted) != bool(desired_mic):
+            elif (not mic_muted) != bool(desired_mic):
                 failures.append(f"mic_on_expected_{bool(desired_mic)}")
         if not failures:
             if desired_camera is None and desired_mic is None:
                 return _pass("No explicit VC device state was requested; device controls are visible enough to proceed.", verifier, 0.72)
             return _pass("Requested VC device state was locally confirmed.", verifier, 0.82)
+        if step.metadata.get("strict_vc_device_state"):
+            return _fail(f"Requested VC device state was not confirmed: {failures}.", "verification_failed", verifier)
         if diff > 0.5 and analysis.device_controls_visible:
             return _pass(
                 f"VC device control changed visibly; OCR state remains ambiguous: {failures}. image_diff={diff:.2f}.",

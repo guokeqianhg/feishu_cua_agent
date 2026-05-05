@@ -3,6 +3,7 @@ from __future__ import annotations
 from core.schemas import BoundingBox, LocatedTarget, Observation, PlanStep
 from tools.vision.lark_locator import WindowBox, detect_lark_window
 from tools.vision.ocr_client import ocr_image
+from PIL import Image
 
 
 VC_STRATEGIES = {
@@ -21,6 +22,8 @@ VC_STRATEGIES = {
     "vc_join_microphone_button",
     "vc_start_camera_button",
     "vc_start_microphone_button",
+    "vc_toggle_camera_button",
+    "vc_toggle_microphone_button",
     "vc_leave_button",
     "vc_permission_allow_button",
     "vc_account_switch_modal",
@@ -129,6 +132,10 @@ def detect_vc_window(screenshot_path: str, strategy: str | None = None) -> Windo
     # Keep VC window selection behind a product-specific boundary. Today this
     # delegates to the existing Feishu surface detector; future VC-only window
     # heuristics can change here without touching IM/Docs/Calendar.
+    if strategy in {"vc_toggle_camera_button", "vc_toggle_microphone_button"}:
+        toolbar_window = _floating_meeting_toolbar_window(screenshot_path)
+        if toolbar_window is not None:
+            return toolbar_window
     if strategy in {"vc_camera_button", "vc_microphone_button", "vc_leave_button"}:
         meeting_window = _os_meeting_window()
         if meeting_window is not None:
@@ -179,7 +186,7 @@ def _bbox_for_strategy(window: WindowBox, strategy: str) -> BoundingBox | None:
     if strategy == "vc_meeting_id_input":
         return _clamp(BoundingBox(x1=x + int(w * 0.43), y1=y + int(h * 0.10), x2=x + int(w * 0.48), y2=y + int(h * 0.16)), window)
     if strategy == "vc_meeting_title_input":
-        return _clamp(BoundingBox(x1=x + int(w * 0.48), y1=y + int(h * 0.14), x2=x + int(w * 0.72), y2=y + int(h * 0.22)), window)
+        return _clamp(BoundingBox(x1=x + int(w * 0.57), y1=y + int(h * 0.165), x2=x + int(w * 0.71), y2=y + int(h * 0.190)), window)
     if strategy == "vc_meeting_card_join_button":
         return _clamp(BoundingBox(x1=x + int(w * 0.64), y1=y + int(h * 0.42), x2=x + int(w * 0.96), y2=y + int(h * 0.74)), window)
     if strategy == "vc_prejoin_join_button":
@@ -195,13 +202,17 @@ def _bbox_for_strategy(window: WindowBox, strategy: str) -> BoundingBox | None:
             return _clamp(BoundingBox(x1=x + int(w * 0.32), y1=y + int(h * 0.36), x2=x + int(w * 0.48), y2=y + int(h * 0.82)), window)
         return _clamp(BoundingBox(x1=x + int(w * 0.33), y1=y + h - 125, x2=x + int(w * 0.40), y2=y + h - 55), window)
     if strategy == "vc_join_microphone_button":
-        return _clamp(BoundingBox(x1=x + int(w * 0.335), y1=y + h - 85, x2=x + int(w * 0.365), y2=y + h - 35), window)
+        return _clamp(BoundingBox(x1=x + int(w * 0.315), y1=y + h - 85, x2=x + int(w * 0.345), y2=y + h - 35), window)
     if strategy == "vc_join_camera_button":
         return _clamp(BoundingBox(x1=x + int(w * 0.415), y1=y + h - 85, x2=x + int(w * 0.445), y2=y + h - 35), window)
     if strategy == "vc_start_microphone_button":
         return _clamp(BoundingBox(x1=x + int(w * 0.305), y1=y + h - 85, x2=x + int(w * 0.335), y2=y + h - 35), window)
     if strategy == "vc_start_camera_button":
         return _clamp(BoundingBox(x1=x + int(w * 0.370), y1=y + h - 85, x2=x + int(w * 0.400), y2=y + h - 35), window)
+    if strategy == "vc_toggle_microphone_button":
+        return _clamp(BoundingBox(x1=x + int(w * 0.31), y1=y + int(h * 0.44), x2=x + int(w * 0.45), y2=y + int(h * 0.88)), window)
+    if strategy == "vc_toggle_camera_button":
+        return _clamp(BoundingBox(x1=x + int(w * 0.55), y1=y + int(h * 0.44), x2=x + int(w * 0.69), y2=y + int(h * 0.88)), window)
     if strategy == "vc_leave_button":
         if _looks_like_mini_meeting_window(window):
             return _clamp(BoundingBox(x1=x + int(w * 0.76), y1=y + int(h * 0.36), x2=x + int(w * 0.96), y2=y + int(h * 0.82)), window)
@@ -229,6 +240,63 @@ def _os_meeting_window() -> WindowBox | None:
 
 def _looks_like_mini_meeting_window(window: WindowBox) -> bool:
     return window.width <= 700 and window.height <= 260
+
+
+def _floating_meeting_toolbar_window(screenshot_path: str) -> WindowBox | None:
+    try:
+        image = Image.open(screenshot_path).convert("RGB")
+    except Exception:
+        return None
+    try:
+        width, height = image.size
+        red_pixels: set[tuple[int, int]] = set()
+        x_start = int(width * 0.70)
+        x_end = width
+        y_end = max(220, int(height * 0.18))
+        for y in range(0, min(height, y_end), 2):
+            for x in range(x_start, x_end, 2):
+                r, g, b = image.getpixel((x, y))
+                if r >= 180 and g <= 135 and b <= 135 and r - g >= 45 and r - b >= 45:
+                    red_pixels.add((x, y))
+        if not red_pixels:
+            return None
+
+        seen: set[tuple[int, int]] = set()
+        best: tuple[int, int, int, int, int] | None = None
+        for pixel in list(red_pixels):
+            if pixel in seen:
+                continue
+            stack = [pixel]
+            seen.add(pixel)
+            xs: list[int] = []
+            ys: list[int] = []
+            while stack:
+                px, py = stack.pop()
+                xs.append(px)
+                ys.append(py)
+                for nx, ny in ((px + 2, py), (px - 2, py), (px, py + 2), (px, py - 2)):
+                    neighbor = (nx, ny)
+                    if neighbor in red_pixels and neighbor not in seen:
+                        seen.add(neighbor)
+                        stack.append(neighbor)
+            if len(xs) < 12:
+                continue
+            component = (len(xs), min(xs), min(ys), max(xs), max(ys))
+            if best is None or component[0] > best[0]:
+                best = component
+        if best is None:
+            return None
+        _count, min_x, min_y, max_x, max_y = best
+        center_x = (min_x + max_x) // 2
+        center_y = (min_y + max_y) // 2
+        return WindowBox(
+            x1=max(0, center_x - 335),
+            y1=max(0, center_y - 90),
+            x2=min(width, center_x + 55),
+            y2=min(height, center_y + 45),
+        )
+    finally:
+        image.close()
 
 
 def _text_bbox_for_strategy(screenshot_path: str, window: WindowBox, strategy: str) -> BoundingBox | None:
@@ -363,20 +431,18 @@ def _normalize_ocr_text(text: str) -> str:
 
 def _vc_device_state_skip_reason(observation: Observation, step: PlanStep) -> str | None:
     try:
-        from tools.vision.vc_error_library import analyze_vc_screen
+        from tools.vision.vc_error_library import analyze_vc_device_state
     except Exception:
         return None
-    state = analyze_vc_screen(observation)
-    if state is None:
-        return None
+    camera_off, mic_muted = analyze_vc_device_state(observation, scope=str(step.metadata.get("vc_device_state_scope") or ""))
     desired_camera = step.metadata.get("desired_camera_on")
-    if desired_camera is not None and state.camera_off is not None:
-        camera_on = not state.camera_off
+    if desired_camera is not None and camera_off is not None:
+        camera_on = not camera_off
         if camera_on == bool(desired_camera):
             return f"VC camera already matches desired state camera_on={camera_on}."
     desired_mic = step.metadata.get("desired_mic_on")
-    if desired_mic is not None and state.mic_muted is not None:
-        mic_on = not state.mic_muted
+    if desired_mic is not None and mic_muted is not None:
+        mic_on = not mic_muted
         if mic_on == bool(desired_mic):
             return f"VC microphone already matches desired state mic_on={mic_on}."
     return None

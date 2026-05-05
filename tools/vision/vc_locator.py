@@ -19,6 +19,7 @@ VC_STRATEGIES = {
     "vc_camera_button",
     "vc_microphone_button",
     "vc_join_camera_button",
+    "vc_join_microphone_click_button",
     "vc_join_microphone_button",
     "vc_start_camera_button",
     "vc_start_microphone_button",
@@ -202,9 +203,11 @@ def _bbox_for_strategy(window: WindowBox, strategy: str) -> BoundingBox | None:
             return _clamp(BoundingBox(x1=x + int(w * 0.32), y1=y + int(h * 0.36), x2=x + int(w * 0.48), y2=y + int(h * 0.82)), window)
         return _clamp(BoundingBox(x1=x + int(w * 0.33), y1=y + h - 125, x2=x + int(w * 0.40), y2=y + h - 55), window)
     if strategy == "vc_join_microphone_button":
-        return _clamp(BoundingBox(x1=x + int(w * 0.315), y1=y + h - 85, x2=x + int(w * 0.345), y2=y + h - 35), window)
+        return _clamp(BoundingBox(x1=x + int(w * 0.260), y1=y + h - 85, x2=x + int(w * 0.290), y2=y + h - 35), window)
+    if strategy == "vc_join_microphone_click_button":
+        return _clamp(BoundingBox(x1=x + int(w * 0.305), y1=y + h - 85, x2=x + int(w * 0.335), y2=y + h - 35), window)
     if strategy == "vc_join_camera_button":
-        return _clamp(BoundingBox(x1=x + int(w * 0.415), y1=y + h - 85, x2=x + int(w * 0.445), y2=y + h - 35), window)
+        return _clamp(BoundingBox(x1=x + int(w * 0.325), y1=y + h - 85, x2=x + int(w * 0.355), y2=y + h - 35), window)
     if strategy == "vc_start_microphone_button":
         return _clamp(BoundingBox(x1=x + int(w * 0.305), y1=y + h - 85, x2=x + int(w * 0.335), y2=y + h - 35), window)
     if strategy == "vc_start_camera_button":
@@ -387,6 +390,12 @@ def _text_bbox_for_strategy(screenshot_path: str, window: WindowBox, strategy: s
         if text_bbox is None:
             return None
         return _clamp(BoundingBox(x1=text_bbox.x1 - 34, y1=text_bbox.y1 - 34, x2=text_bbox.x2 + 34, y2=text_bbox.y2 + 34), window)
+    if strategy == "vc_join_microphone_click_button":
+        roi = _clamp(BoundingBox(x1=window.x1 + 180, y1=window.y2 - 180, x2=window.x2 - 120, y2=window.y2 - 20), window)
+        text_bbox = _find_ocr_text_bbox(screenshot_path, roi, ("麦克风", "麦克", "Microphone", "Mic"))
+        if text_bbox is None:
+            return None
+        return _clamp(BoundingBox(x1=text_bbox.x1 - 26, y1=text_bbox.y1 - 10, x2=text_bbox.x1 + 10, y2=text_bbox.y2 + 10), window)
     return None
 
 

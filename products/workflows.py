@@ -2497,7 +2497,7 @@ def _vc_join_device_steps(case: TestCase) -> list[PlanStep]:
                 retry_limit=2,
                 metadata={
                     "local_verifier": "vc_device_state",
-                    "locator_strategy": "vc_join_microphone_button",
+                    "locator_strategy": "vc_join_microphone_click_button",
                     "locator_kind": "button",
                     "desired_mic_on": bool(desired_mic),
                     "requires_vc_device_toggle_guard": True,

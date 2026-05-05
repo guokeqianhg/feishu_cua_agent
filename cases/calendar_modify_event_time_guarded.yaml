@@ -1,9 +1,9 @@
 id: calendar_modify_event_time_guarded_001
 name: Guarded Calendar modify event time
 product: calendar
-instruction: "打开飞书日历，创建一个测试日程，标题为「CUA Calendar 改时间测试」，时间为「明天 10:00」，然后把时间修改为「明天 11:00」。"
+instruction: "打开飞书日历，创建一个测试日程，标题为「CUA Calendar 改时间测试」，先设为「明天 10:00」，然后在保存前把编辑器里的时间修改为「明天 11:00」。"
 preconditions:
-  - The current account can create and modify Calendar events.
+  - The current account can create Calendar events and edit the test event before saving.
 expected_result: "A guarded test calendar event time is changed to the requested new time when modify guard is enabled."
 tags:
   - calendar

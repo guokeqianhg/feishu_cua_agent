@@ -6,8 +6,8 @@ import re
 from PIL import Image
 
 from core.schemas import BoundingBox, Observation
-from tools.vision.lark_locator import detect_lark_window, strategy_bbox_from_screenshot
 from tools.vision.ocr_client import ocr_image
+from tools.vision.vc_locator import detect_vc_meeting_window, detect_vc_window, vc_strategy_bbox_from_screenshot
 
 
 @dataclass(frozen=True)
@@ -47,22 +47,45 @@ def analyze_vc_screen(observation: Observation | None) -> VCScreenState | None:
     if observation is None:
         return None
     normalized = _normalize_text(_visible_vc_text(observation))
+    title_normalized = _normalize_text(observation.window_title or "")
+    meeting_child_window = _looks_like_meeting_child_window(title_normalized) or _looks_like_meeting_child_window(normalized)
+    mini_meeting_visible = _mini_meeting_bar_visible(observation, normalized)
     vc_visible = _looks_like_vc(normalized)
-    prejoin_visible = _looks_like_prejoin(normalized)
-    in_meeting_visible = _looks_like_in_meeting(normalized)
-    vc_home_visible = _looks_like_vc_home(normalized)
-    join_dialog_visible = _looks_like_join_dialog(normalized)
-    meeting_id_not_resolved = _looks_like_meeting_id_not_resolved(normalized)
+    prejoin_visible = _looks_like_prejoin(normalized, meeting_child_window=meeting_child_window)
+    in_meeting_visible = _looks_like_in_meeting(normalized) or mini_meeting_visible
+    vc_home_visible = _looks_like_vc_home(normalized, meeting_child_window=meeting_child_window)
+    join_dialog_visible = _looks_like_join_dialog(normalized, meeting_child_window=meeting_child_window)
+    meeting_id_not_resolved = _looks_like_meeting_id_not_resolved(normalized, meeting_child_window=meeting_child_window)
     join_button_disabled = join_dialog_visible and _join_button_disabled(observation)
     meeting_id_not_entered = join_dialog_visible and not _meeting_id_in_input_roi(observation)
     permission_prompt_visible = _looks_like_permission_prompt(normalized)
-    device_controls_visible = _device_controls_visible(normalized)
+    device_controls_visible = _device_controls_visible(normalized) or mini_meeting_visible
     camera_off = _camera_off(normalized)
     mic_muted = _mic_muted(normalized)
     if camera_off is None:
         camera_off = _device_off_from_button_roi(observation, "vc_camera_button")
     if mic_muted is None:
         mic_muted = _device_off_from_button_roi(observation, "vc_microphone_button")
+    main_camera_states = [
+        item
+        for item in (
+            _main_meeting_device_off(observation, "vc_start_camera_button"),
+            _main_meeting_device_off(observation, "vc_join_camera_button"),
+        )
+        if item is not None
+    ]
+    if main_camera_states:
+        camera_off = any(main_camera_states)
+    main_mic_states = [
+        item
+        for item in (
+            _main_meeting_device_off(observation, "vc_start_microphone_button"),
+            _main_meeting_device_off(observation, "vc_join_microphone_button"),
+        )
+        if item is not None
+    ]
+    if main_mic_states:
+        mic_muted = any(main_mic_states)
     wrong_state = _first_wrong_state(
         normalized,
         vc_visible=vc_visible,
@@ -97,7 +120,11 @@ def _visible_vc_text(observation: Observation) -> str:
     pieces: list[str] = []
     if observation.window_title:
         pieces.append(observation.window_title)
-    window = detect_lark_window(observation.screenshot_path)
+    meeting_window = detect_vc_meeting_window()
+    if meeting_window is not None:
+        meeting_roi = BoundingBox(x1=meeting_window.x1, y1=meeting_window.y1, x2=meeting_window.x2, y2=meeting_window.y2)
+        pieces.extend(text for _bbox, text, _confidence in ocr_image(observation.screenshot_path, meeting_roi))
+    window = detect_vc_window(observation.screenshot_path)
     roi = BoundingBox(x1=window.x1, y1=window.y1, x2=window.x2, y2=window.y2) if window else None
     pieces.extend(text for _bbox, text, _confidence in ocr_image(observation.screenshot_path, roi))
     return " ".join(pieces)
@@ -123,8 +150,10 @@ def _looks_like_vc(normalized: str) -> bool:
     return any(item in normalized for item in markers)
 
 
-def _looks_like_prejoin(normalized: str) -> bool:
-    if _looks_like_vc_home(normalized):
+def _looks_like_prejoin(normalized: str, *, meeting_child_window: bool = False) -> bool:
+    if _looks_like_start_dialog(normalized, meeting_child_window=meeting_child_window):
+        return True
+    if _looks_like_vc_home(normalized, meeting_child_window=meeting_child_window):
         return False
     if "\u5f00\u59cb\u4f1a\u8bae" in normalized and any(item in normalized for item in ("\u9ea6\u514b\u98ce", "\u6444\u50cf\u5934")):
         return True
@@ -136,20 +165,51 @@ def _looks_like_prejoin(normalized: str) -> bool:
     return sum(1 for item in markers if item in normalized) >= 1 and not _looks_like_in_meeting(normalized)
 
 
-def _looks_like_join_dialog(normalized: str) -> bool:
-    return any(item in normalized for item in ("会议id", "会议号", "输入会议", "meetingid")) and not all(
-        item in normalized for item in ("发起会议", "预约会议", "网络研讨会")
-    )
+def _looks_like_join_dialog(normalized: str, *, meeting_child_window: bool = False) -> bool:
+    has_input_prompt = any(item in normalized for item in ("会议id", "会议号", "输入会议", "meetingid"))
+    if not has_input_prompt:
+        return False
+    if meeting_child_window:
+        return True
+    return not all(item in normalized for item in ("发起会议", "预约会议", "网络研讨会"))
 
 
-def _looks_like_meeting_id_not_resolved(normalized: str) -> bool:
+def _looks_like_meeting_id_not_resolved(normalized: str, *, meeting_child_window: bool = False) -> bool:
+    if meeting_child_window:
+        return False
     return all(item in normalized for item in ("发起会议", "加入会议", "预约会议", "网络研讨会")) and "会议id" not in normalized
 
 
-def _looks_like_vc_home(normalized: str) -> bool:
+def _looks_like_vc_home(normalized: str, *, meeting_child_window: bool = False) -> bool:
+    if meeting_child_window:
+        return False
     mojibake_home = "鍙戣捣浼氳" in normalized and "鍔犲叆浼氳" in normalized
     unicode_home = "视频会议" in normalized and "发起会议" in normalized and "加入会议" in normalized
     return mojibake_home or unicode_home
+
+
+def _looks_like_meeting_child_window(normalized: str) -> bool:
+    return any(item in normalized for item in ("飞书会议", "feishumeeting", "larkmeeting"))
+
+
+def _looks_like_start_dialog(normalized: str, *, meeting_child_window: bool = False) -> bool:
+    if not meeting_child_window:
+        return False
+    if _looks_like_in_meeting(normalized):
+        return False
+    markers = (
+        "的视频会议",
+        "发起会议",
+        "开始会议",
+        "新会议",
+        "会议主题",
+        "会议名称",
+        "麦克风",
+        "摄像头",
+        "startmeeting",
+        "newmeeting",
+    )
+    return any(item in normalized for item in markers)
 
 
 def _contains_meeting_id(normalized: str) -> bool:
@@ -157,7 +217,7 @@ def _contains_meeting_id(normalized: str) -> bool:
 
 
 def _meeting_id_in_input_roi(observation: Observation) -> bool:
-    window = detect_lark_window(observation.screenshot_path)
+    window = detect_vc_window(observation.screenshot_path)
     if window is None:
         return False
     roi = _meeting_id_input_roi(window)
@@ -175,7 +235,7 @@ def _meeting_id_input_roi(window) -> BoundingBox:
 
 
 def _join_button_disabled(observation: Observation) -> bool:
-    window = detect_lark_window(observation.screenshot_path)
+    window = detect_vc_window(observation.screenshot_path)
     if window is None:
         return False
     image = Image.open(observation.screenshot_path).convert("RGB")
@@ -222,6 +282,17 @@ def _looks_like_in_meeting(normalized: str) -> bool:
     return sum(1 for item in markers if item in normalized) >= 2
 
 
+def _mini_meeting_bar_visible(observation: Observation, normalized: str) -> bool:
+    if detect_vc_meeting_window() is None:
+        return False
+    if any(item in normalized for item in ("正在讲话", "speaking", "会议信息", "meetinginfo")):
+        return True
+    title = _normalize_text(observation.window_title or "")
+    if not _looks_like_meeting_child_window(title) and not _looks_like_meeting_child_window(normalized):
+        return False
+    return True
+
+
 def _looks_like_permission_prompt(normalized: str) -> bool:
     markers = ("权限", "允许", "麦克风", "摄像头", "permission", "allow")
     return ("权限" in normalized or "permission" in normalized or "allow" in normalized) and any(
@@ -252,7 +323,7 @@ def _mic_muted(normalized: str) -> bool | None:
 
 
 def _device_off_from_button_roi(observation: Observation, strategy: str) -> bool | None:
-    bbox = strategy_bbox_from_screenshot(observation.screenshot_path, strategy)
+    bbox = vc_strategy_bbox_from_screenshot(observation.screenshot_path, strategy)
     if bbox is None:
         return None
     image = Image.open(observation.screenshot_path).convert("RGB")
@@ -264,6 +335,38 @@ def _device_off_from_button_roi(observation: Observation, strategy: str) -> bool
                 r, g, b = image.getpixel((x, y))
                 total += 1
                 if r >= 190 and g <= 95 and b <= 95:
+                    red += 1
+        if total <= 0:
+            return None
+        return (red / total) >= 0.012
+    finally:
+        image.close()
+
+
+def _main_meeting_mic_muted(observation: Observation) -> bool | None:
+    return _main_meeting_device_off(observation, "vc_join_microphone_button")
+
+
+def _main_meeting_camera_off(observation: Observation) -> bool | None:
+    return _main_meeting_device_off(observation, "vc_join_camera_button")
+
+
+def _main_meeting_device_off(observation: Observation, strategy: str) -> bool | None:
+    window = detect_vc_window(observation.screenshot_path)
+    if window is None or window.width < 900 or window.height < 600:
+        return None
+    bbox = vc_strategy_bbox_from_screenshot(observation.screenshot_path, strategy)
+    if bbox is None:
+        return None
+    image = Image.open(observation.screenshot_path).convert("RGB")
+    try:
+        red = 0
+        total = 0
+        for y in range(max(0, bbox.y1), min(image.height, bbox.y2), 2):
+            for x in range(max(0, bbox.x1), min(image.width, bbox.x2), 2):
+                r, g, b = image.getpixel((x, y))
+                total += 1
+                if r >= 190 and g <= 125 and b <= 125:
                     red += 1
         if total <= 0:
             return None

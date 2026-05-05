@@ -436,10 +436,33 @@ python -B cli.py run-case cases\calendar_create_event.yaml --auto-debug
 自然语言：
 
 ```powershell
-python -B cli.py run --product calendar --instruction "创建一个标题为「测试会议」的日程，时间为明天10:00，参会人为李新元" --auto-debug
+python -B cli.py run --product calendar --instruction "创建一个标题为「测试会议」的日程" --auto-debug
 ```
 
-### 7.2 邀请参会人
+### 7.2 创建指定时间日程
+
+运行前开关：
+
+```powershell
+$env:DRY_RUN="false"
+$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
+$env:CUA_LARK_MODEL_PROVIDER="auto"
+$env:CUA_LARK_ALLOW_CALENDAR_CREATE="true"
+```
+
+YAML：
+
+```powershell
+python -B cli.py run-case cases\calendar_create_timed_event.yaml --auto-debug
+```
+
+自然语言：
+
+```powershell
+python -B cli.py run --product calendar --instruction "创建一个标题为「加时间测试会议」的日程，时间为明天10:00" --auto-debug
+```
+
+### 7.3 邀请参会人
 
 运行前开关：
 
@@ -463,29 +486,6 @@ python -B cli.py run-case cases\calendar_invite_attendee_guarded.yaml --auto-deb
 python -B cli.py run --product calendar --instruction "创建一个标题为「邀请测试会议」的日程，时间为明天10:00，并邀请李新元参加" --auto-debug
 ```
 
-### 7.3 修改日程时间
-
-运行前开关：
-
-```powershell
-$env:DRY_RUN="false"
-$env:CUA_LARK_PLACEHOLDER_SCREENSHOT="false"
-$env:CUA_LARK_MODEL_PROVIDER="auto"
-$env:CUA_LARK_ALLOW_CALENDAR_MODIFY="true"
-```
-
-YAML：
-
-```powershell
-python -B cli.py run-case cases\calendar_modify_event_time_guarded.yaml --auto-debug
-```
-
-自然语言：
-
-```powershell
-python -B cli.py run --product calendar --instruction "把标题为「测试会议」的日程从明天10:00修改到明天11:00" --auto-debug
-```
-
 ### 7.4 查看忙闲
 
 运行前开关：
@@ -505,7 +505,7 @@ python -B cli.py run-case cases\calendar_view_busy_free_guarded.yaml --auto-debu
 自然语言：
 
 ```powershell
-python -B cli.py run --product calendar --instruction "打开飞书日历，查看李新元明天 10:00 的忙闲状态，不保存日程" --auto-debug
+python -B cli.py run --product calendar --instruction "打开飞书日历，查看李新元明天10:00的忙闲状态，不创建或保存日程" --auto-debug
 ```
 
 ## 8. VC 用例

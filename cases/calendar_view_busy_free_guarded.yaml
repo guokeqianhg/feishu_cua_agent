@@ -1,7 +1,7 @@
 id: calendar_view_busy_free_guarded_001
 name: Calendar view busy-free state
 product: calendar
-instruction: "打开飞书日历，查看「李新元」明天 10:00 的忙闲状态，不保存日程。"
+instruction: "打开飞书日历，查看「李新元」明天 10:00 的忙闲状态，不创建或保存日程。"
 preconditions:
   - The current account can open Calendar and search/select attendees.
 expected_result: "Calendar attendee busy/free information is observed without saving an event."

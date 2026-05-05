@@ -35,6 +35,8 @@ def locate_lark_target(observation: Observation, step: PlanStep) -> LocatedTarge
         strategy = _strategy_from_step(step)
     if not strategy:
         return None
+    if _is_vc_strategy_name(strategy):
+        return None
     if step.metadata.get("skip_if_event_date_visible") and _calendar_target_date_visible(observation.screenshot_path, step):
         return None
     if step.metadata.get("skip_if_calendar_busy_free_visible") and _calendar_target_busy_free_visible(
@@ -76,6 +78,19 @@ def locate_lark_target(observation: Observation, step: PlanStep) -> LocatedTarge
                 warnings=[],
                 recommended_action="skip",
                 metadata={"strategy": strategy, "skip_reason": "vc_already_in_meeting"},
+            )
+    if step.metadata.get("skip_if_docs_share_recipient_ready_for_send"):
+        window = _window_for_strategy(observation.screenshot_path, strategy)
+        if window is not None and _docs_share_recipient_ready_for_send(observation.screenshot_path, window, step):
+            return LocatedTarget(
+                step_id=step.id,
+                target_description=step.target_description,
+                source="cv",
+                confidence=0.0,
+                reason="Docs share recipient is already selected and the footer Send button is available; skip duplicate add-recipient click.",
+                warnings=[],
+                recommended_action="skip",
+                metadata={"strategy": strategy, "skip_reason": "docs_share_recipient_ready_for_send"},
             )
     if strategy == "search_first_result":
         located = _im_search_result_for_target(observation.screenshot_path, step)
@@ -127,6 +142,8 @@ def locate_lark_target(observation: Observation, step: PlanStep) -> LocatedTarge
 
 
 def strategy_bbox_from_screenshot(screenshot_path: str, strategy: str) -> BoundingBox | None:
+    if _is_vc_strategy_name(strategy):
+        return None
     window = _window_for_strategy(screenshot_path, strategy)
     if window is None:
         return None
@@ -136,44 +153,15 @@ def strategy_bbox_from_screenshot(screenshot_path: str, strategy: str) -> Boundi
     return _bbox_for_strategy(window, strategy)
 
 
+def _is_vc_strategy_name(strategy: str) -> bool:
+    return strategy.startswith("vc_")
+
+
 def _window_for_strategy(screenshot_path: str, strategy: str) -> WindowBox | None:
     screenshot_window = detect_lark_window(screenshot_path)
-    if strategy in {"vc_camera_button", "vc_microphone_button", "vc_leave_button"}:
-        meeting_window = _vc_in_meeting_window(screenshot_path, screenshot_window)
-        if meeting_window is not None:
-            return meeting_window
     if strategy in {"calendar_sidebar_entry", "docs_sidebar_entry", "im_sidebar_entry", "vc_sidebar_entry"} and screenshot_window is not None:
         return screenshot_window
-    if strategy in {
-        "vc_meeting_id_input",
-        "vc_meeting_title_input",
-        "vc_prejoin_join_button",
-        "vc_camera_button",
-        "vc_microphone_button",
-        "vc_leave_button",
-        "vc_permission_allow_button",
-    } and screenshot_window is not None:
-        return screenshot_window
     return _os_lark_window_for_strategy(strategy) or screenshot_window
-
-
-def _vc_in_meeting_window(screenshot_path: str, fallback: WindowBox | None = None) -> WindowBox | None:
-    image = Image.open(screenshot_path)
-    try:
-        full = WindowBox(x1=0, y1=0, x2=image.width, y2=image.height)
-    finally:
-        image.close()
-    roi = fallback or full
-    text_bbox = _find_ocr_text_bbox(screenshot_path, roi, ("会议信息", "Meeting info", "会议详情"))
-    if text_bbox is None:
-        return None
-    x1 = max(0, text_bbox.x1 - 35)
-    y1 = max(0, text_bbox.y1 - 28)
-    x2 = fallback.x2 if fallback else full.x2
-    y2 = fallback.y2 if fallback else full.y2
-    if x2 - x1 < 700 or y2 - y1 < 500:
-        return None
-    return WindowBox(x1=x1, y1=y1, x2=x2, y2=y2)
 
 
 def _os_lark_window_for_strategy(strategy: str) -> WindowBox | None:
@@ -241,17 +229,14 @@ def _os_lark_window_for_strategy(strategy: str) -> WindowBox | None:
         "calendar_save_button",
         "vc_sidebar_entry",
         "vc_start_meeting_button",
-        "vc_start_meeting_button_fresh",
         "vc_join_meeting_button",
         "vc_meeting_id_input",
-        "vc_meeting_title_input",
         "vc_meeting_card_join_button",
         "vc_prejoin_join_button",
         "vc_camera_button",
         "vc_microphone_button",
         "vc_leave_button",
         "vc_permission_allow_button",
-        "vc_account_switch_modal",
         "search_first_result",
         "message_input",
         "im_sidebar_entry",
@@ -423,8 +408,6 @@ def _strategy_from_step(step: PlanStep) -> str | None:
         return "vc_join_meeting_button"
     if step.id == "type_vc_meeting_id":
         return "vc_meeting_id_input"
-    if step.id == "type_vc_meeting_title":
-        return "vc_meeting_title_input"
     if step.id == "enter_started_meeting":
         return "vc_meeting_card_join_button"
     if step.id in {"confirm_start_meeting", "confirm_join_meeting"}:
@@ -646,14 +629,12 @@ def _bbox_for_strategy(window: WindowBox, strategy: str) -> BoundingBox | None:
         return _clamp(BoundingBox(x1=window.x1 + int(window.width * 0.63), y1=window.y1 + int(window.height * 0.52), x2=window.x1 + int(window.width * 0.70), y2=window.y1 + int(window.height * 0.58)), window)
     if strategy == "calendar_save_button":
         return _clamp(BoundingBox(x1=x + min(1210, w - 730), y1=y + h - 105, x2=x + min(1345, w - 595), y2=y + h - 45), window)
-    if strategy in {"vc_start_meeting_button", "vc_start_meeting_button_fresh"}:
+    if strategy == "vc_start_meeting_button":
         return _clamp(BoundingBox(x1=x + int(w * 0.36), y1=y + int(h * 0.28), x2=x + int(w * 0.55), y2=y + int(h * 0.42)), window)
     if strategy == "vc_join_meeting_button":
         return _clamp(BoundingBox(x1=x + int(w * 0.56), y1=y + int(h * 0.28), x2=x + int(w * 0.75), y2=y + int(h * 0.42)), window)
     if strategy == "vc_meeting_id_input":
-        return _clamp(BoundingBox(x1=x + int(w * 0.56), y1=y + int(h * 0.10), x2=x + int(w * 0.82), y2=y + int(h * 0.20)), window)
-    if strategy == "vc_meeting_title_input":
-        return _clamp(BoundingBox(x1=x + int(w * 0.36), y1=y + int(h * 0.08), x2=x + int(w * 0.64), y2=y + int(h * 0.18)), window)
+        return _clamp(BoundingBox(x1=x + int(w * 0.43), y1=y + int(h * 0.10), x2=x + int(w * 0.48), y2=y + int(h * 0.16)), window)
     if strategy == "vc_meeting_card_join_button":
         return _clamp(BoundingBox(x1=x + int(w * 0.64), y1=y + int(h * 0.42), x2=x + int(w * 0.96), y2=y + int(h * 0.74)), window)
     if strategy == "vc_prejoin_join_button":
@@ -687,8 +668,6 @@ def _bbox_for_strategy(window: WindowBox, strategy: str) -> BoundingBox | None:
         return _clamp(BoundingBox(x1=x + max(520, w // 2), y1=y + h - 165, x2=x + w - 40, y2=y + h - 45), window)
     if strategy == "im_search_history_tab":
         return _clamp(BoundingBox(x1=x + 210, y1=y + 165, x2=x + 450, y2=y + 225), window)
-    if strategy == "im_search_group_tab":
-        return _clamp(BoundingBox(x1=x + 380, y1=y + 110, x2=x + 610, y2=y + 180), window)
     if strategy == "im_new_chat_button":
         return _clamp(BoundingBox(x1=x + 210, y1=y + 24, x2=x + 285, y2=y + 92), window)
     if strategy == "im_create_group_option":
@@ -747,11 +726,7 @@ def _text_bbox_for_strategy(
         if text_bbox is None:
             return None
         return _clamp(BoundingBox(x1=text_bbox.x1 - 52, y1=text_bbox.y1 - 22, x2=text_bbox.x2 + 126, y2=text_bbox.y2 + 24), window)
-    if strategy in {"vc_start_meeting_button", "vc_start_meeting_button_fresh"}:
-        if strategy == "vc_start_meeting_button":
-            prejoin_start = _vc_visible_prejoin_start_button(screenshot_path)
-            if prejoin_start is not None:
-                return prejoin_start
+    if strategy == "vc_start_meeting_button":
         roi = _clamp(BoundingBox(x1=window.x1 + 240, y1=window.y1 + 120, x2=window.x2 - 120, y2=window.y2 - 160), window)
         text_bbox = _find_ocr_text_bbox(screenshot_path, roi, ("发起会议", "开始会议", "新会议", "Start meeting", "New meeting"))
         if text_bbox is None:
@@ -768,8 +743,7 @@ def _text_bbox_for_strategy(
     if strategy == "vc_meeting_id_input":
         roi = _clamp(BoundingBox(x1=window.x1 + 220, y1=window.y1 + 120, x2=window.x2 - 160, y2=window.y2 - 180), window)
         text = _normalize_ocr_text(_ocr_text_for_roi(screenshot_path, roi))
-        has_input_prompt = any(item in text for item in ("会议id", "会议号", "输入会议", "meetingid"))
-        if "发起会议" in text and "预约会议" in text and "网络研讨会" in text and not has_input_prompt:
+        if "发起会议" in text and "预约会议" in text and "网络研讨会" in text:
             return None
         text_bbox = _find_ocr_text_bbox(screenshot_path, roi, ("会议ID", "会议号", "输入会议", "Meeting ID", "meeting id"))
         if text_bbox is None:
@@ -778,39 +752,17 @@ def _text_bbox_for_strategy(
                 # input line from the confirmed join dialog.
                 return _bbox_for_strategy(window, strategy)
             return None
-        # The editable field focuses when clicking the floating "会议ID" label
-        # area. The underline below it is too low and often misses the input.
+        # Feishu keeps the caret at the left edge of the floating label area.
+        # Click that text baseline, not the empty preview panel below it.
         return _clamp(
             BoundingBox(
-                x1=text_bbox.x1 - 10,
+                x1=text_bbox.x1 - 16,
                 y1=text_bbox.y1 - 8,
-                x2=text_bbox.x2 + 12,
-                y2=text_bbox.y2 + 8,
+                x2=text_bbox.x1 + 36,
+                y2=text_bbox.y2 + 10,
             ),
             window,
         )
-    if strategy == "vc_meeting_title_input":
-        roi = _clamp(
-            BoundingBox(
-                x1=window.x1 + int(window.width * 0.24),
-                y1=window.y1 + int(window.height * 0.05),
-                x2=window.x1 + int(window.width * 0.76),
-                y2=window.y1 + int(window.height * 0.24),
-            ),
-            window,
-        )
-        text_bbox = _find_ocr_text_bbox(screenshot_path, roi, ("的视频会议", "视频会议", "Meeting", "meeting"))
-        if text_bbox is not None:
-            return _clamp(
-                BoundingBox(
-                    x1=text_bbox.x1 - 18,
-                    y1=text_bbox.y1 - 10,
-                    x2=text_bbox.x2 + 24,
-                    y2=text_bbox.y2 + 12,
-                ),
-                window,
-            )
-        return _bbox_for_strategy(window, strategy)
     if strategy == "vc_meeting_card_join_button":
         roi = _clamp(BoundingBox(x1=window.x1 + int(window.width * 0.50), y1=window.y1 + 120, x2=window.x2 - 20, y2=window.y2 - 120), window)
         text_bbox = _find_ocr_text_bbox(screenshot_path, roi, ("加入会议", "进入会议", "发起会议", "加入", "进入", "Join", "Start"))
@@ -832,28 +784,7 @@ def _text_bbox_for_strategy(
         if text_bbox is None:
             return None
         return _clamp(BoundingBox(x1=text_bbox.x1 - 42, y1=text_bbox.y1 - 22, x2=text_bbox.x2 + 52, y2=text_bbox.y2 + 24), window)
-    if strategy == "vc_account_switch_modal":
-        roi = _clamp(BoundingBox(x1=window.x1 + 120, y1=window.y1 + 80, x2=window.x2 - 120, y2=window.y2 - 80), window)
-        text = _normalize_ocr_text(_ocr_text_for_roi(screenshot_path, roi))
-        markers = ("登录更多账号", "加入已有企业", "创建新账号", "使用其他方式登录", "moreaccounts", "login")
-        if not any(item in text for item in markers):
-            return None
-        text_bbox = _find_ocr_text_bbox(screenshot_path, roi, ("登录更多账号", "加入已有企业", "创建新账号", "Login"))
-        if text_bbox is None:
-            return _clamp(
-                BoundingBox(
-                    x1=window.x1 + int(window.width * 0.30),
-                    y1=window.y1 + int(window.height * 0.16),
-                    x2=window.x1 + int(window.width * 0.72),
-                    y2=window.y1 + int(window.height * 0.66),
-                ),
-                window,
-            )
-        return _clamp(BoundingBox(x1=text_bbox.x1 - 40, y1=text_bbox.y1 - 28, x2=text_bbox.x2 + 80, y2=text_bbox.y2 + 36), window)
     if strategy in {"vc_camera_button", "vc_microphone_button", "vc_leave_button"}:
-        toolbar_bbox = _vc_toolbar_button_from_anchor(screenshot_path, window, strategy)
-        if toolbar_bbox is not None:
-            return toolbar_bbox
         candidates = {
             "vc_camera_button": ("摄像头", "摄像", "Camera", "Video"),
             "vc_microphone_button": ("麦克风", "麦克", "静音", "Microphone", "Mute", "Mic"),
@@ -1034,34 +965,33 @@ def _text_bbox_for_strategy(
         blue_bbox = _docs_share_button_from_pixels(screenshot_path, window)
         if blue_bbox is not None:
             return blue_bbox
-        roi = _clamp(BoundingBox(x1=window.x1 + 430, y1=window.y1 + 90, x2=window.x1 + 880, y2=window.y1 + 230), window)
+        roi = _clamp(BoundingBox(x1=window.x1 + 650, y1=window.y1 + 120, x2=window.x1 + 860, y2=window.y1 + 220), window)
         text_bbox = _find_ocr_text_bbox(screenshot_path, roi, ("分享", "共享", "Share"))
         if text_bbox is None:
             return None
         return _clamp(BoundingBox(x1=text_bbox.x1 - 42, y1=text_bbox.y1 - 20, x2=text_bbox.x2 + 52, y2=text_bbox.y2 + 22), window)
     if strategy == "docs_share_recipient_input":
-        roi = _clamp(BoundingBox(x1=window.x1 + 260, y1=window.y1 + 120, x2=window.x2 - 160, y2=window.y2 - 160), window)
+        roi = _clamp(BoundingBox(x1=window.x1 + 70, y1=window.y1 + 235, x2=window.x1 + 820, y2=window.y1 + 470), window)
         text_bbox = _find_ocr_text_bbox(screenshot_path, roi, ("搜索", "添加", "姓名", "邮箱", "联系人"))
         if text_bbox is None:
             return None
-        return _clamp(BoundingBox(x1=text_bbox.x1 - 28, y1=text_bbox.y1 - 18, x2=text_bbox.x2 + 360, y2=text_bbox.y2 + 24), window)
+        return _clamp(BoundingBox(x1=text_bbox.x1 - 28, y1=text_bbox.y1 - 18, x2=text_bbox.x2 + 460, y2=text_bbox.y2 + 24), window)
     if strategy == "docs_share_recipient_result":
         recipient = str(step.metadata.get("share_recipient") or "") if step else ""
-        roi = _clamp(BoundingBox(x1=window.x1 + 260, y1=window.y1 + 180, x2=window.x2 - 160, y2=window.y2 - 120), window)
+        roi = _clamp(BoundingBox(x1=window.x1 + 70, y1=window.y1 + 360, x2=window.x1 + 860, y2=window.y1 + 790), window)
         text_bbox = _find_ocr_text_bbox(screenshot_path, roi, tuple(item for item in (recipient, "李新元") if item))
         if text_bbox is None:
             return None
         return _clamp(BoundingBox(x1=text_bbox.x1 - 40, y1=text_bbox.y1 - 20, x2=text_bbox.x2 + 180, y2=text_bbox.y2 + 26), window)
     if strategy == "docs_share_add_recipient_button":
-        input_bbox = _text_bbox_for_strategy(screenshot_path, window, "docs_share_recipient_input", step)
-        if input_bbox is None:
-            return None
-        return _clamp(BoundingBox(x1=input_bbox.x2 - 72, y1=input_bbox.y1, x2=input_bbox.x2, y2=input_bbox.y2), window)
+        return _docs_share_add_button_bbox(screenshot_path, window)
     if strategy == "docs_share_confirm_button":
         blue_bbox = _docs_share_confirm_button_from_pixels(screenshot_path, window)
         if blue_bbox is not None:
             return blue_bbox
-        roi = _clamp(BoundingBox(x1=window.x1 + 900, y1=window.y1 + 650, x2=window.x1 + 1260, y2=window.y1 + 860), window)
+        roi = _docs_share_confirm_footer_roi(screenshot_path, window)
+        if roi is None:
+            roi = _clamp(BoundingBox(x1=window.x1 + 520, y1=window.y1 + 690, x2=window.x1 + 880, y2=window.y1 + 900), window)
         text_bbox = _find_ocr_text_bbox(screenshot_path, roi, ("发送", "邀请", "确定", "完成", "Send", "Invite"))
         if text_bbox is None:
             return None
@@ -1154,12 +1084,6 @@ def _text_bbox_for_strategy(
         if text_bbox is None:
             return None
         return _clamp(BoundingBox(x1=text_bbox.x1 - 36, y1=text_bbox.y1 - 18, x2=text_bbox.x2 + 42, y2=text_bbox.y2 + 20), window)
-    if strategy == "im_search_group_tab":
-        roi = _clamp(BoundingBox(x1=window.x1 + 120, y1=window.y1 + 95, x2=window.x2 - 160, y2=window.y1 + 185), window)
-        text_bbox = _find_ocr_text_bbox(screenshot_path, roi, ("群组", "会话"))
-        if text_bbox is None:
-            return None
-        return _clamp(BoundingBox(x1=text_bbox.x1 - 38, y1=text_bbox.y1 - 18, x2=text_bbox.x2 + 46, y2=text_bbox.y2 + 20), window)
     if strategy == "im_create_group_option":
         roi = _clamp(BoundingBox(x1=window.x1 + 40, y1=window.y1 + 50, x2=window.x1 + 520, y2=window.y2 - 40), window)
         text_bbox = _find_ocr_text_bbox(screenshot_path, roi, ("创建群组", "创建群", "发起群聊", "新建群组"))
@@ -1168,33 +1092,14 @@ def _text_bbox_for_strategy(
         return _clamp(BoundingBox(x1=text_bbox.x1 - 48, y1=text_bbox.y1 - 20, x2=text_bbox.x2 + 80, y2=text_bbox.y2 + 24), window)
     if strategy == "im_mention_suggestion_row":
         mention_user = str(step.metadata.get("mention_user") or "") if step else ""
-        if not mention_user:
-            return None
         msg = _bbox_for_strategy(window, "message_input")
-        if msg is not None:
-            roi = _clamp(
-                BoundingBox(
-                    x1=max(window.x1 + int(window.width * 0.38), msg.x1 - 90),
-                    y1=max(window.y1 + int(window.height * 0.42), msg.y1 - 330),
-                    x2=min(window.x2 - 30, msg.x2 + 40),
-                    y2=min(window.y2 - 25, msg.y2 + 40),
-                ),
-                window,
-            )
-        else:
-            roi = _clamp(
-                BoundingBox(
-                    x1=window.x1 + int(window.width * 0.38),
-                    y1=window.y1 + int(window.height * 0.55),
-                    x2=window.x2 - 30,
-                    y2=window.y2 - 25,
-                ),
-                window,
-            )
-        text_bbox = _find_ocr_text_bbox(screenshot_path, roi, (mention_user,))
+        if msg is None:
+            return None
+        roi = _clamp(BoundingBox(x1=msg.x1 - 20, y1=max(window.y1, msg.y1 - 260), x2=msg.x2, y2=max(window.y1 + 80, msg.y1 - 20)), window)
+        text_bbox = _find_ocr_text_bbox(screenshot_path, roi, tuple(item for item in (mention_user, "李新元") if item))
         if text_bbox is None:
             return None
-        return _clamp(BoundingBox(x1=text_bbox.x1 - 50, y1=text_bbox.y1 - 24, x2=text_bbox.x2 + 80, y2=text_bbox.y2 + 30), window)
+        return _clamp(BoundingBox(x1=roi.x1, y1=text_bbox.y1 - 26, x2=roi.x2, y2=text_bbox.y2 + 30), window)
     if strategy == "im_group_create_confirm_button":
         roi = _clamp(BoundingBox(x1=window.x1, y1=window.y2 - 170, x2=window.x2, y2=window.y2 - 20), window)
         text_bbox = _find_ocr_text_bbox(screenshot_path, roi, ("创建", "确定", "完成"))
@@ -1218,70 +1123,10 @@ def _text_bbox_for_strategy(
     if strategy == "im_reply_context_bar":
         return _reply_context_bbox_from_ocr(screenshot_path, window)
     if strategy == "im_quick_reaction_button":
-        return _quick_reaction_bbox_from_pixels(screenshot_path, window, step)
+        return _quick_reaction_bbox_from_pixels(screenshot_path, window)
     if strategy == "calendar_date_picker_day":
         return _calendar_date_picker_day_bbox(screenshot_path, window, step)
     return None
-
-
-def _vc_toolbar_button_from_anchor(screenshot_path: str, window: WindowBox, strategy: str) -> BoundingBox | None:
-    roi = _clamp(BoundingBox(x1=window.x1, y1=window.y2 - 180, x2=window.x2, y2=window.y2 - 15), window)
-    share_bbox = _find_ocr_text_bbox(screenshot_path, roi, ("共享", "Share"))
-    if share_bbox is None:
-        return None
-    button_w = max(88, min(104, int(window.width * 0.055)))
-    gap = max(18, min(26, int(window.width * 0.013)))
-    share_center_x = (share_bbox.x1 + share_bbox.x2) // 2
-    center_y = (share_bbox.y1 + share_bbox.y2) // 2
-    center_offsets = {
-        "vc_microphone_button": -(button_w * 2 + gap * 2),
-        "vc_camera_button": -(button_w + gap),
-        "vc_leave_button": button_w * 3 + gap * 3,
-    }
-    center_x = share_center_x + center_offsets[strategy]
-    if strategy in {"vc_microphone_button", "vc_camera_button"}:
-        center_x -= button_w // 4
-    return _clamp(
-        BoundingBox(
-            x1=center_x - button_w // 2,
-            y1=center_y - 36,
-            x2=center_x + button_w // 2,
-            y2=center_y + 36,
-        ),
-        window,
-    )
-
-
-def _vc_visible_prejoin_start_button(screenshot_path: str) -> BoundingBox | None:
-    image = Image.open(screenshot_path).convert("RGB")
-    try:
-        width, height = image.size
-        roi = BoundingBox(x1=0, y1=0, x2=width, y2=height)
-        text_bbox = _find_ocr_text_bbox(screenshot_path, roi, ("开始会议", "Start meeting", "Start"))
-        if text_bbox is None:
-            return None
-        expanded = _clamp(
-            BoundingBox(
-                x1=text_bbox.x1 - 80,
-                y1=text_bbox.y1 - 34,
-                x2=text_bbox.x2 + 80,
-                y2=text_bbox.y2 + 34,
-            ),
-            WindowBox(x1=0, y1=0, x2=width, y2=height),
-        )
-        blue = 0
-        total = 0
-        for y in range(expanded.y1, expanded.y2, 3):
-            for x in range(expanded.x1, expanded.x2, 3):
-                red, green, blue_channel = image.getpixel((x, y))
-                total += 1
-                if blue_channel >= 170 and blue_channel - red >= 80 and blue_channel - green >= 25:
-                    blue += 1
-        if total <= 0 or blue / total < 0.08:
-            return None
-        return expanded
-    finally:
-        image.close()
 
 
 def _im_search_result_for_target(screenshot_path: str, step: PlanStep) -> LocatedTarget | None:
@@ -1299,28 +1144,13 @@ def _im_search_result_for_target(screenshot_path: str, step: PlanStep) -> Locate
             x1=max(window.x1, input_box.x1 - 20),
             y1=input_box.y2 + 6,
             x2=min(window.x2, input_box.x2 + 40),
-            y2=min(window.y2, input_box.y2 + 520),
+            y2=min(window.y2, input_box.y2 + 360),
         ),
         window,
     )
     results = ocr_image(screenshot_path, roi)
     target_norm = _normalize_ocr_text(target)
-    if target_norm:
-        roi_text = _normalize_ocr_text(" ".join(text for _bbox, text, _confidence in results))
-        if not any(item in roi_text for item in ("消息", "群组", "联系人", "聊天", target_norm)):
-            return LocatedTarget(
-                step_id=step.id,
-                target_description=step.target_description,
-                source="ocr",
-                bbox=None,
-                center=None,
-                confidence=0.0,
-                reason="IM search result panel did not look populated yet.",
-                warnings=["IM search results are still loading or not visible"],
-                recommended_action="abort",
-                metadata={"strategy": "search_first_result", "target": target, "roi": roi.model_dump(), "roi_text": roi_text},
-            )
-    best: tuple[BoundingBox, str, float, int] | None = None
+    best: tuple[BoundingBox, str, float] | None = None
     for bbox, text, confidence in results:
         normalized = _normalize_ocr_text(text)
         if not target_norm or target_norm not in normalized:
@@ -1340,12 +1170,9 @@ def _im_search_result_for_target(screenshot_path: str, step: PlanStep) -> Locate
         row_norm = _normalize_ocr_text(row_text)
         if _looks_like_wrong_im_result(row_norm):
             continue
-        row_kind = _im_search_result_row_kind(row_norm, target_norm)
-        if row_kind <= 0:
-            continue
-        score = float(confidence) + row_kind
+        score = float(confidence)
         if best is None or score > best[2]:
-            best = (bbox, row_text or text, score, row_kind)
+            best = (bbox, row_text or text, score)
     if best is None:
         return LocatedTarget(
             step_id=step.id,
@@ -1359,7 +1186,7 @@ def _im_search_result_for_target(screenshot_path: str, step: PlanStep) -> Locate
             recommended_action="abort",
             metadata={"strategy": "search_first_result", "target": target, "roi": roi.model_dump()},
         )
-    text_bbox, row_text, confidence, row_kind = best
+    text_bbox, row_text, confidence = best
     row_bbox = _clamp(
         BoundingBox(
             x1=roi.x1,
@@ -1377,14 +1204,13 @@ def _im_search_result_for_target(screenshot_path: str, step: PlanStep) -> Locate
         center=_safe_click_in_search_result_row(text_bbox, row_bbox),
         confidence=min(0.98, max(0.86, confidence)),
         reason=f"OCR confirmed IM target row for {target!r}: {row_text!r}.",
-        metadata={"strategy": "search_first_result", "target": target, "row_text": row_text, "row_kind": row_kind, "roi": roi.model_dump()},
+        metadata={"strategy": "search_first_result", "target": target, "row_text": row_text, "roi": roi.model_dump()},
     )
 
 
 def _safe_click_in_search_result_row(text_bbox: BoundingBox, row_bbox: BoundingBox) -> tuple[int, int]:
     _text_cx, text_cy = text_bbox.center()
-    row_width = max(row_bbox.x2 - row_bbox.x1, 1)
-    x = row_bbox.x1 + max(42, min(96, row_width // 8))
+    x = max(row_bbox.x1 + 42, min(text_bbox.x1 - 28, row_bbox.x2 - 60))
     y = max(row_bbox.y1 + 12, min(text_cy, row_bbox.y2 - 12))
     return (x, y)
 
@@ -1392,18 +1218,6 @@ def _safe_click_in_search_result_row(text_bbox: BoundingBox, row_bbox: BoundingB
 def _looks_like_wrong_im_result(normalized_text: str) -> bool:
     wrong_tokens = ("知识问答", "知识库问答", "智能问答", "机器人", "ai助手")
     return any(_normalize_ocr_text(token) in normalized_text for token in wrong_tokens)
-
-
-def _im_search_result_row_kind(normalized_text: str, target_norm: str) -> int:
-    if not target_norm or target_norm not in normalized_text:
-        return 0
-    strong_tokens = ("会话成员", "所在会话", "会话类型", "群组", "聊天")
-    if any(_normalize_ocr_text(token) in normalized_text for token in strong_tokens):
-        return 2
-    weak_tokens = ("消息", "发送给", "按enter发送")
-    if any(_normalize_ocr_text(token) in normalized_text for token in weak_tokens):
-        return 1
-    return 0
 
 
 def _calendar_people_search_result_bbox(
@@ -1442,6 +1256,17 @@ def _calendar_people_search_result_bbox(
     )
     if "订阅中" in row_text or "退订成功" in row_text:
         return None
+    if step and step.id == "select_busy_free_contact":
+        center_y = text_bbox.center()[1]
+        return _clamp(
+            BoundingBox(
+                x1=max(window.x1, text_bbox.x1 - 76),
+                y1=center_y - 28,
+                x2=min(window.x2, text_bbox.x2 + 170),
+                y2=center_y + 28,
+            ),
+            window,
+        )
     icon_center_x = min(text_bbox.x2 + 155, window.x1 + 585, window.x2 - 35)
     icon_center_y = text_bbox.center()[1]
     if _calendar_search_result_icon_selected(screenshot_path, icon_center_x, icon_center_y):
@@ -1798,30 +1623,24 @@ def _reply_context_bbox_from_ocr(screenshot_path: str, window: WindowBox) -> Bou
     return _clamp(BoundingBox(x1=text_bbox.x1 - 34, y1=text_bbox.y1 - 18, x2=text_bbox.x2 + 320, y2=text_bbox.y2 + 22), window)
 
 
-def _quick_reaction_bbox_from_pixels(screenshot_path: str, window: WindowBox, step: PlanStep | None = None) -> BoundingBox | None:
+def _quick_reaction_bbox_from_pixels(screenshot_path: str, window: WindowBox) -> BoundingBox | None:
     path = Path(screenshot_path)
     if not path.exists():
         return None
     image = Image.open(path).convert("RGB")
     try:
-        message_bbox = _message_row_bbox_by_text(screenshot_path, window, step)
-        icon_bbox = _quick_reaction_bbox_from_icons(image, window, message_bbox)
-        if icon_bbox is not None:
-            return icon_bbox
-        icon_bbox = _quick_reaction_bbox_from_visible_toolbar_icons(image, window, message_bbox)
-        if icon_bbox is not None:
-            return icon_bbox
+        message_bbox = _message_row_bbox_by_text(screenshot_path, window)
         roi = _clamp(
             (
                 BoundingBox(
-                    x1=max(_im_chat_content_left(window), message_bbox.x1 - 80),
+                    x1=max(window.x1 + max(420, window.width // 3), message_bbox.x1 - 120),
                     y1=max(window.y1 + 120, message_bbox.y1 - 120),
-                    x2=min(window.x2 - 70, message_bbox.x2 + 430),
+                    x2=min(window.x2 - 70, message_bbox.x2 + 380),
                     y2=min(window.y2 - 120, message_bbox.y2 + 120),
                 )
                 if message_bbox is not None
                 else BoundingBox(
-                    x1=_im_chat_content_left(window),
+                    x1=window.x1 + max(460, window.width // 3),
                     y1=window.y1 + 170,
                     x2=window.x2 - 95,
                     y2=window.y2 - 170,
@@ -1846,6 +1665,10 @@ def _quick_reaction_bbox_from_pixels(screenshot_path: str, window: WindowBox, st
                 if count >= 12 and 120 <= box_w <= 260 and 30 <= box_h <= 70:
                     candidates.append(component)
         if not candidates:
+            if message_bbox is not None:
+                cx = min(window.x2 - 120, message_bbox.x2 + 46)
+                cy = max(window.y1 + 160, min(message_bbox.y1 - 24, window.y2 - 180))
+                return _clamp(BoundingBox(x1=cx - 22, y1=cy - 22, x2=cx + 22, y2=cy + 22), window)
             return None
         if message_bbox is not None:
             target_y = message_bbox.center()[1]
@@ -1869,133 +1692,10 @@ def _quick_reaction_bbox_from_pixels(screenshot_path: str, window: WindowBox, st
         image.close()
 
 
-def _quick_reaction_bbox_from_icons(image: Image.Image, window: WindowBox, message_bbox: BoundingBox | None) -> BoundingBox | None:
-    if message_bbox is None:
-        return None
-    roi = _clamp(
-        BoundingBox(
-            x1=max(_im_chat_content_left(window), message_bbox.x2 - 70),
-            y1=max(window.y1 + 120, message_bbox.y1 - 46),
-            x2=min(window.x2 - 60, message_bbox.x2 + 260),
-            y2=min(window.y2 - 120, message_bbox.y1 + 70),
-        ),
-        window,
-    )
-    pixels = image.load()
-    width, height = image.size
-    visited: set[tuple[int, int]] = set()
-    icons: list[tuple[int, int, int, int, int]] = []
-    for y in range(max(roi.y1, 0), min(roi.y2, height)):
-        for x in range(max(roi.x1, 0), min(roi.x2, width)):
-            if (x, y) in visited or not _looks_like_quick_reaction_icon(*pixels[x, y]):
-                continue
-            component = _flood_color_component(
-                pixels,
-                width,
-                height,
-                roi,
-                x,
-                y,
-                visited,
-                _looks_like_quick_reaction_icon,
-                max_count=1200,
-            )
-            if component is None:
-                continue
-            count, min_x, min_y, max_x, max_y = component
-            box_w = max_x - min_x + 1
-            box_h = max_y - min_y + 1
-            if count >= 20 and 6 <= box_w <= 28 and 6 <= box_h <= 28:
-                icons.append(component)
-    if len(icons) < 2:
-        return None
-    icons.sort(key=lambda item: item[1])
-    _count, min_x, min_y, max_x, max_y = icons[0]
-    return _clamp(BoundingBox(x1=min_x - 8, y1=min_y - 8, x2=max_x + 8, y2=max_y + 8), window)
-
-
-def _quick_reaction_bbox_from_visible_toolbar_icons(
-    image: Image.Image,
-    window: WindowBox,
-    message_bbox: BoundingBox | None,
-) -> BoundingBox | None:
-    roi = _clamp(
-        BoundingBox(
-            x1=_im_chat_content_left(window),
-            y1=window.y1 + 180,
-            x2=window.x2 - 60,
-            y2=window.y2 - 150,
-        ),
-        window,
-    )
-    pixels = image.load()
-    width, height = image.size
-    visited: set[tuple[int, int]] = set()
-    icons: list[tuple[int, int, int, int, int]] = []
-    for y in range(max(roi.y1, 0), min(roi.y2, height)):
-        for x in range(max(roi.x1, 0), min(roi.x2, width)):
-            if (x, y) in visited or not _looks_like_quick_reaction_icon(*pixels[x, y]):
-                continue
-            component = _flood_color_component(
-                pixels,
-                width,
-                height,
-                roi,
-                x,
-                y,
-                visited,
-                _looks_like_quick_reaction_icon,
-                max_count=1200,
-            )
-            if component is None:
-                continue
-            count, min_x, min_y, max_x, max_y = component
-            box_w = max_x - min_x + 1
-            box_h = max_y - min_y + 1
-            if count >= 20 and 6 <= box_w <= 30 and 6 <= box_h <= 30:
-                icons.append(component)
-    if len(icons) < 3:
-        return None
-
-    rows: list[list[tuple[int, int, int, int, int]]] = []
-    for icon in sorted(icons, key=lambda item: ((item[2] + item[4]) // 2, item[1])):
-        cy = (icon[2] + icon[4]) // 2
-        for row in rows:
-            row_cy = sum((item[2] + item[4]) // 2 for item in row) / len(row)
-            if abs(cy - row_cy) <= 12:
-                row.append(icon)
-                break
-        else:
-            rows.append([icon])
-
-    candidates: list[list[tuple[int, int, int, int, int]]] = []
-    for row in rows:
-        row.sort(key=lambda item: item[1])
-        if len(row) < 3:
-            continue
-        span = row[-1][3] - row[0][1] + 1
-        max_gap = max((right[1] - left[3] for left, right in zip(row, row[1:])), default=0)
-        if 55 <= span <= 240 and max_gap <= 55:
-            candidates.append(row)
-    if not candidates:
-        return None
-
-    if message_bbox is not None:
-        target_y = message_bbox.center()[1]
-        row = min(
-            candidates,
-            key=lambda items: (abs((sum((item[2] + item[4]) // 2 for item in items) / len(items)) - target_y), -len(items)),
-        )
-    else:
-        row = max(candidates, key=lambda items: (len(items), sum((item[2] + item[4]) // 2 for item in items) / len(items)))
-    _count, min_x, min_y, max_x, max_y = row[0]
-    return _clamp(BoundingBox(x1=min_x - 8, y1=min_y - 8, x2=max_x + 8, y2=max_y + 8), window)
-
-
 def _message_row_bbox_by_text(screenshot_path: str, window: WindowBox, step: PlanStep | None = None) -> BoundingBox | None:
     roi = _clamp(
         BoundingBox(
-            x1=_im_chat_content_left(window),
+            x1=window.x1 + max(360, window.width // 3),
             y1=window.y1 + 160,
             x2=window.x2 - 40,
             y2=window.y2 - 150,
@@ -2004,55 +1704,12 @@ def _message_row_bbox_by_text(screenshot_path: str, window: WindowBox, step: Pla
     )
     search_text = str(step.metadata.get("search_text") or "") if step else ""
     candidates = tuple(item for item in (search_text, "hello from CUA") if item) or ("hello from CUA",)
-    text_bbox = _find_im_message_text_bbox(screenshot_path, roi, candidates)
+    text_bbox = _find_ocr_text_bbox(screenshot_path, roi, candidates)
     if text_bbox is None:
-        text_bbox = _find_im_message_text_bbox(screenshot_path, roi, ("CUA-Lark guarded smoke message", "CUA-Larkguarded smoke", "guarded smoke"))
+        text_bbox = _find_ocr_text_bbox(screenshot_path, roi, ("CUA-Lark guarded smoke message",))
     if text_bbox is None:
         return None
     return _clamp(BoundingBox(x1=text_bbox.x1 - 40, y1=text_bbox.y1 - 28, x2=text_bbox.x2 + 70, y2=text_bbox.y2 + 34), window)
-
-
-def _im_chat_content_left(window: WindowBox) -> int:
-    return window.x1 + max(700, int(window.width * 0.46))
-
-
-def _find_im_message_text_bbox(screenshot_path: str, roi: BoundingBox, candidates: tuple[str, ...]) -> BoundingBox | None:
-    results = ocr_image(screenshot_path, roi)
-    if not results:
-        return None
-    best: tuple[BoundingBox, float] | None = None
-    for bbox, text, confidence in results:
-        normalized = _normalize_ocr_text(text)
-        if not normalized:
-            continue
-        if any(_normalize_ocr_text(skip) in normalized for skip in ("发送给", "按enter发送", "输入消息")):
-            continue
-        for candidate in candidates:
-            target = _normalize_ocr_text(candidate)
-            if not target:
-                continue
-            score = 0.0
-            if target in normalized:
-                score = float(confidence) * min(1.0, max(len(target), 1) / max(len(normalized), 1))
-            elif normalized in target and len(normalized) >= 6:
-                score = float(confidence) * (len(normalized) / max(len(target), 1)) * 0.75
-            else:
-                overlap = _im_token_overlap_score(normalized, target)
-                if overlap >= 0.55:
-                    score = float(confidence) * overlap * 0.7
-            if score and (best is None or score > best[1]):
-                best = (bbox, score)
-    return best[0] if best else None
-
-
-def _im_token_overlap_score(normalized: str, target: str) -> float:
-    if not normalized or not target:
-        return 0.0
-    tokens = [item for item in ("hello", "from", "cua", "cualark", "guarded", "smoke") if item in target]
-    if not tokens:
-        return 0.0
-    hits = sum(1 for item in tokens if item in normalized)
-    return hits / len(tokens)
 
 
 def _docs_share_button_from_pixels(screenshot_path: str, window: WindowBox) -> BoundingBox | None:
@@ -2110,18 +1767,71 @@ def _docs_share_confirm_button_from_pixels(screenshot_path: str, window: WindowB
         return None
     image = Image.open(path).convert("RGB")
     try:
-        roi = _clamp(
-            BoundingBox(
-                x1=window.x1 + 850,
-                y1=window.y1 + 620,
-                x2=window.x1 + 1260,
-                y2=window.y1 + 860,
-            ),
-            window,
-        )
-        return _largest_blue_button_bbox(image, roi, window)
+        roi = _docs_share_confirm_footer_roi(screenshot_path, window)
+        if roi is None:
+            roi = _clamp(BoundingBox(x1=window.x1 + 520, y1=window.y1 + 690, x2=window.x1 + 880, y2=window.y1 + 900), window)
+        return _docs_share_blue_button_bbox_in_roi(image, roi, window)
     finally:
         image.close()
+
+
+def _docs_share_recipient_ready_for_send(screenshot_path: str, window: WindowBox, step: PlanStep) -> bool:
+    _ = step
+    return _docs_share_confirm_button_from_pixels(screenshot_path, window) is not None
+
+
+def _docs_share_add_button_bbox(screenshot_path: str, window: WindowBox) -> BoundingBox | None:
+    recipient_roi = _clamp(BoundingBox(x1=window.x1 + 70, y1=window.y1 + 250, x2=window.x1 + 840, y2=window.y1 + 470), window)
+    plus_bbox = _find_ocr_text_bbox(screenshot_path, recipient_roi, ("+",))
+    if plus_bbox is not None:
+        return _clamp(BoundingBox(x1=plus_bbox.x1 - 30, y1=plus_bbox.y1 - 30, x2=plus_bbox.x2 + 30, y2=plus_bbox.y2 + 30), window)
+    return _clamp(BoundingBox(x1=window.x1 + 700, y1=window.y1 + 275, x2=window.x1 + 780, y2=window.y1 + 345), window)
+
+
+def _docs_share_confirm_footer_roi(screenshot_path: str, window: WindowBox) -> BoundingBox | None:
+    _ = screenshot_path
+    return _clamp(
+        BoundingBox(
+            x1=window.x1 + 610,
+            y1=window.y1 + 720,
+            x2=window.x1 + 860,
+            y2=window.y1 + 900,
+        ),
+        window,
+    )
+
+
+def _docs_share_blue_button_bbox_in_roi(image: Image.Image, roi: BoundingBox, window: WindowBox) -> BoundingBox | None:
+    pixels = image.load()
+    width, height = image.size
+    visited: set[tuple[int, int]] = set()
+    candidates: list[tuple[int, int, int, int, int]] = []
+    for y in range(max(roi.y1, 0), min(roi.y2, height), 2):
+        for x in range(max(roi.x1, 0), min(roi.x2, width), 2):
+            if (x, y) in visited or not _looks_like_docs_share_blue(*pixels[x, y]):
+                continue
+            component = _flood_color_component(
+                pixels,
+                width,
+                height,
+                roi,
+                x,
+                y,
+                visited,
+                _looks_like_docs_share_blue,
+                max_count=7000,
+            )
+            if component is None:
+                continue
+            count, min_x, min_y, max_x, max_y = component
+            box_w = max_x - min_x + 1
+            box_h = max_y - min_y + 1
+            if count >= 80 and 60 <= box_w <= 200 and 32 <= box_h <= 80:
+                candidates.append(component)
+    if not candidates:
+        return None
+    _count, min_x, min_y, max_x, max_y = max(candidates, key=lambda item: (item[0], item[2]))
+    return _clamp(BoundingBox(x1=min_x - 6, y1=min_y - 6, x2=max_x + 6, y2=max_y + 6), window)
 
 
 def _largest_blue_button_bbox(image: Image.Image, roi: BoundingBox, window: WindowBox) -> BoundingBox | None:
@@ -2158,15 +1868,11 @@ def _largest_blue_button_bbox(image: Image.Image, roi: BoundingBox, window: Wind
 
 
 def _looks_like_docs_share_blue(red: int, green: int, blue: int) -> bool:
-    return 20 <= red <= 95 and 90 <= green <= 165 and 210 <= blue <= 255 and blue - red >= 120 and blue - green >= 55
+    return 0 <= red <= 110 and 70 <= green <= 180 and 180 <= blue <= 255 and blue - red >= 80 and blue - green >= 35
 
 
 def _looks_like_toolbar_border(red: int, green: int, blue: int) -> bool:
-    return 220 <= red <= 255 and 220 <= green <= 255 and 220 <= blue <= 255 and max(red, green, blue) - min(red, green, blue) <= 24
-
-
-def _looks_like_quick_reaction_icon(red: int, green: int, blue: int) -> bool:
-    return 90 <= red <= 190 and 90 <= green <= 190 and 90 <= blue <= 195 and max(red, green, blue) - min(red, green, blue) <= 42
+    return 220 <= red <= 245 and 220 <= green <= 245 and 220 <= blue <= 245 and max(red, green, blue) - min(red, green, blue) <= 24
 
 
 def _flood_color_component(

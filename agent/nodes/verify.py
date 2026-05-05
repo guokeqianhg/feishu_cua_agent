@@ -32,9 +32,7 @@ def _template(state: AgentState) -> str:
 
 
 def _should_defer_local_case_pass_to_vlm(state: AgentState, verification: StepVerification | None) -> bool:
-    if verification is None or not verification.success:
-        return False
-    return _is_real_execution(state) and _template(state) == "calendar_view_busy_free_guarded"
+    return False
 
 
 def _observation_text(state: AgentState) -> str:

@@ -6,6 +6,7 @@ cases:
   - path: docs_rich_edit_guarded.yaml
   - path: docs_share_doc_guarded.yaml
   - path: calendar_create_event.yaml
+  - path: calendar_create_timed_event.yaml
   - path: calendar_invite_attendee_guarded.yaml
   - path: calendar_modify_event_time_guarded.yaml
   - path: calendar_view_busy_free_guarded.yaml

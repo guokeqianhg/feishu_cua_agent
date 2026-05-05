@@ -1,0 +1,17 @@
+id: calendar_create_timed_event_001
+name: Guarded Calendar create timed event
+product: calendar
+instruction: "打开飞书日历，创建一个测试日程，标题为「CUA Calendar 加时间测试」，时间为「明天 10:00」，不添加参会人。"
+preconditions:
+  - The current account can create Calendar events.
+expected_result: "A guarded test calendar event is created with the requested title and time, without attendees."
+tags:
+  - calendar
+  - timed
+  - guarded
+timeout_seconds: 420
+metadata:
+  plan_template: calendar_create_event_guarded
+  safety_guard_required: true
+  event_title: "CUA Calendar 加时间测试"
+  event_time: "明天 10:00"

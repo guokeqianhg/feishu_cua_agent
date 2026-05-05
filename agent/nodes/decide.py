@@ -10,6 +10,7 @@ from core.schemas import BoundingBox, LocatedTarget, Observation, PlanStep
 from storage.run_logger import RunLogger
 from tools.vision.lark_locator import detect_lark_window, locate_lark_target
 from tools.vision.ocr_client import match_text_in_region, match_text_row_in_region, ocr_image
+from tools.vision.vc_locator import is_vc_step, locate_vc_target
 from tools.vision.vlm_client import build_vlm_client
 
 
@@ -500,6 +501,37 @@ def locate_node(state: AgentState) -> AgentState:
         located = dry_run_target
     elif state.runtime and state.runtime.real_desktop_execution and step.id in {"open_chat", "select_group_member", "select_mention_candidate"}:
         located = _locate_open_chat(state, step)
+    elif is_vc_step(step):
+        located = locate_vc_target(state.before_observation, step)
+        if located is None and step.action in {"conditional_click", "conditional_hotkey"}:
+            located = LocatedTarget(
+                step_id=step.id,
+                target_description=step.target_description,
+                source="none",
+                confidence=0.0,
+                reason="Optional VC target was not visible in the current screenshot.",
+                recommended_action="skip",
+                metadata={
+                    "strategy": str(step.metadata.get("locator_strategy") or ""),
+                    "locator_scope": "vc",
+                },
+            )
+        elif located is None and step.metadata.get("require_lark_locator"):
+            located = LocatedTarget(
+                step_id=step.id,
+                target_description=step.target_description,
+                source="none",
+                confidence=0.0,
+                reason="Required VC OCR/layout locator did not confirm this target; VLM fallback is disabled for this step.",
+                recommended_action="abort",
+                metadata={
+                    "strategy": str(step.metadata.get("locator_strategy") or ""),
+                    "require_lark_locator": True,
+                    "locator_scope": "vc",
+                },
+            )
+        elif located is None:
+            located = vlm.locate_element(state.before_observation, step)
     elif step.action in {"conditional_click", "conditional_hotkey"}:
         located = locate_lark_target(state.before_observation, step) or LocatedTarget(
             step_id=step.id,

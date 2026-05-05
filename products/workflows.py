@@ -1191,36 +1191,53 @@ def _docs_share_doc_guarded_plan(case: TestCase) -> TestPlan:
                     "locator_kind": "text_input",
                     "share_recipient": recipient,
                     "clear_before_type": True,
+                    "require_lark_locator": True,
+                    "preserve_foreground": True,
+                },
+            ),
+            PlanStep(
+                id="wait_doc_share_recipient_results",
+                action="wait",
+                wait_seconds=1.5,
+                expected_state=f"Docs share search results for {recipient!r} have loaded.",
+                retry_limit=1,
+                metadata={
+                    "local_verifier": "visible_screen",
+                    "requires_doc_share_guard": True,
+                    "share_recipient": recipient,
                     "preserve_foreground": True,
                 },
             ),
             PlanStep(
                 id="select_doc_share_recipient",
-                action="click",
+                action="conditional_click",
                 target_description=f"Docs share recipient result {recipient}",
                 expected_state=f"Recipient {recipient!r} is selected for sharing.",
-                retry_limit=1,
+                retry_limit=3,
                 metadata={
                     "local_verifier": "visible_screen",
                     "requires_doc_share_guard": True,
                     "locator_strategy": "docs_share_recipient_result",
                     "locator_kind": "button",
                     "share_recipient": recipient,
+                    "require_lark_locator": True,
                     "preserve_foreground": True,
                 },
             ),
             PlanStep(
                 id="add_doc_share_recipient",
-                action="click",
+                action="conditional_click",
                 target_description="Docs share add recipient plus button",
                 expected_state=f"Recipient {recipient!r} is added to the share collaborator list.",
-                retry_limit=1,
+                retry_limit=2,
                 metadata={
                     "local_verifier": "visible_screen",
                     "requires_doc_share_guard": True,
                     "locator_strategy": "docs_share_add_recipient_button",
                     "locator_kind": "button",
                     "share_recipient": recipient,
+                    "require_lark_locator": True,
+                    "skip_if_docs_share_recipient_ready_for_send": True,
                     "preserve_foreground": True,
                 },
             ),
@@ -1242,7 +1259,7 @@ def _docs_share_doc_guarded_plan(case: TestCase) -> TestPlan:
                 action="click",
                 target_description="Docs share confirm button",
                 expected_state=f"Document share invitation is sent or applied for {recipient!r}.",
-                retry_limit=1,
+                retry_limit=2,
                 metadata={
                     "local_verifier": "visible_screen",
                     "requires_doc_share_guard": True,
@@ -1250,6 +1267,7 @@ def _docs_share_doc_guarded_plan(case: TestCase) -> TestPlan:
                     "locator_strategy": "docs_share_confirm_button",
                     "locator_kind": "button",
                     "share_recipient": recipient,
+                    "require_lark_locator": True,
                     "preserve_foreground": True,
                 },
             ),
@@ -1290,8 +1308,10 @@ def _docs_share_doc_guarded_plan(case: TestCase) -> TestPlan:
 def _calendar_create_event_guarded_plan(case: TestCase) -> TestPlan:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     title = str(case.metadata.get("event_title") or f"CUA-Lark calendar test {stamp}")
-    event_time = str(case.metadata.get("event_time") or "明天 10:00")
-    event_date, start_time, end_time = _calendar_time_parts(event_time)
+    raw_event_time = str(case.metadata.get("event_time") or "").strip()
+    has_event_time = bool(raw_event_time)
+    event_time = raw_event_time
+    event_date, start_time, end_time = _calendar_time_parts(event_time) if has_event_time else ("", "", "")
     attendees = [str(item) for item in case.metadata.get("attendees", []) if str(item).strip()]
     attendees_text = ", ".join(attendees)
     steps = [
@@ -1412,78 +1432,83 @@ def _calendar_create_event_guarded_plan(case: TestCase) -> TestPlan:
                 "clear_before_type": True,
             },
         ),
-        PlanStep(
-            id="click_event_start_date",
-            action="click",
-            target_description="calendar event start date field",
-            expected_state="Calendar event date picker is opened.",
-            retry_limit=1,
-            metadata={
-                "local_verifier": "visible_screen",
-                "requires_calendar_create_guard": True,
-                "locator_strategy": "calendar_event_start_date",
-                "locator_kind": "text_input",
-                "event_time": event_time,
-            },
-        ),
-        PlanStep(
-            id="click_event_start_day",
-            action="click",
-            target_description=f"calendar date picker day {event_date}",
-            expected_state=f"Calendar event start date reflects {event_date!r}.",
-            retry_limit=1,
-            metadata={
-                "local_verifier": "visible_screen",
-                "requires_calendar_create_guard": True,
-                "locator_strategy": "calendar_date_picker_day",
-                "locator_kind": "button",
-                "event_date": event_date,
-                "require_lark_locator": True,
-                "dry_run_simulated_target": True,
-            },
-        ),
-        PlanStep(
-            id="type_event_start_time",
-            action="type_text",
-            target_description="calendar event start time field",
-            input_text=start_time,
-            expected_state=f"Calendar event start time reflects {start_time!r}.",
-            retry_limit=1,
-            metadata={
-                "local_verifier": "visible_screen",
-                "requires_calendar_create_guard": True,
-                "locator_strategy": "calendar_event_start_time",
-                "locator_kind": "text_input",
-                "event_time": event_time,
-                "calendar_time_from_text": True,
-                "clear_before_type": True,
-                "double_click_before_type": True,
-                "press_enter_after_type": True,
-            },
-        ),
-        PlanStep(
-            id="type_event_end_time",
-            action="type_text",
-            target_description="calendar event end time field",
-            input_text=end_time,
-            expected_state=f"Calendar event time reflects {event_time!r}.",
-            retry_limit=1,
-            metadata={
-                "local_verifier": "visible_screen",
-                "requires_calendar_create_guard": True,
-                "locator_strategy": "calendar_event_end_time",
-                "locator_kind": "text_input",
-                "event_time": event_time,
-                "event_date": event_date,
-                "start_time": start_time,
-                "end_time": end_time,
-                "calendar_time_from_text": True,
-                "clear_before_type": True,
-                "double_click_before_type": True,
-                "press_enter_after_type": True,
-            },
-        ),
     ]
+    if has_event_time:
+        steps.extend(
+            [
+                PlanStep(
+                    id="click_event_start_date",
+                    action="click",
+                    target_description="calendar event start date field",
+                    expected_state="Calendar event date picker is opened.",
+                    retry_limit=1,
+                    metadata={
+                        "local_verifier": "visible_screen",
+                        "requires_calendar_create_guard": True,
+                        "locator_strategy": "calendar_event_start_date",
+                        "locator_kind": "text_input",
+                        "event_time": event_time,
+                    },
+                ),
+                PlanStep(
+                    id="click_event_start_day",
+                    action="click",
+                    target_description=f"calendar date picker day {event_date}",
+                    expected_state=f"Calendar event start date reflects {event_date!r}.",
+                    retry_limit=1,
+                    metadata={
+                        "local_verifier": "visible_screen",
+                        "requires_calendar_create_guard": True,
+                        "locator_strategy": "calendar_date_picker_day",
+                        "locator_kind": "button",
+                        "event_date": event_date,
+                        "require_lark_locator": True,
+                        "dry_run_simulated_target": True,
+                    },
+                ),
+                PlanStep(
+                    id="type_event_start_time",
+                    action="type_text",
+                    target_description="calendar event start time field",
+                    input_text=start_time,
+                    expected_state=f"Calendar event start time reflects {start_time!r}.",
+                    retry_limit=1,
+                    metadata={
+                        "local_verifier": "visible_screen",
+                        "requires_calendar_create_guard": True,
+                        "locator_strategy": "calendar_event_start_time",
+                        "locator_kind": "text_input",
+                        "event_time": event_time,
+                        "calendar_time_from_text": True,
+                        "clear_before_type": True,
+                        "double_click_before_type": True,
+                        "press_enter_after_type": True,
+                    },
+                ),
+                PlanStep(
+                    id="type_event_end_time",
+                    action="type_text",
+                    target_description="calendar event end time field",
+                    input_text=end_time,
+                    expected_state=f"Calendar event time reflects {event_time!r}.",
+                    retry_limit=1,
+                    metadata={
+                        "local_verifier": "visible_screen",
+                        "requires_calendar_create_guard": True,
+                        "locator_strategy": "calendar_event_end_time",
+                        "locator_kind": "text_input",
+                        "event_time": event_time,
+                        "event_date": event_date,
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "calendar_time_from_text": True,
+                        "clear_before_type": True,
+                        "double_click_before_type": True,
+                        "press_enter_after_type": True,
+                    },
+                ),
+            ]
+        )
     if attendees_text and settings.allow_calendar_invite:
         steps.append(
             PlanStep(
@@ -1581,75 +1606,98 @@ def _calendar_create_event_guarded_plan(case: TestCase) -> TestPlan:
                 retry_limit=1,
                 metadata={"local_verifier": "visible_screen"},
             ),
-            PlanStep(
-                id="click_saved_event_view_date",
-                action="conditional_click",
-                target_description="Calendar current date selector after saving an event",
-                expected_state="Calendar date picker is opened if the saved event date is not already visible.",
-                retry_limit=1,
-                metadata={
-                    "local_verifier": "visible_screen",
-                    "locator_strategy": "calendar_view_date_button",
-                    "locator_kind": "button",
-                    "event_date": event_date,
-                    "skip_if_event_date_visible": True,
-                },
-            ),
-            PlanStep(
-                id="click_saved_event_view_day",
-                action="conditional_click",
-                target_description=f"Calendar saved event day {event_date}",
-                expected_state=f"Calendar selects the saved event day {event_date}.",
-                retry_limit=1,
-                metadata={
-                    "local_verifier": "calendar_visible",
-                    "locator_strategy": "calendar_date_picker_day",
-                    "locator_kind": "button",
-                    "event_date": event_date,
-                    "skip_if_event_date_visible": True,
-                    "require_lark_locator": True,
-                },
-            ),
-            PlanStep(
-                id="scroll_saved_calendar_to_event_time",
-                action="scroll",
-                target_description=f"Calendar main time axis near {start_time}",
-                scroll_amount=None,
-                expected_state=f"Calendar time axis is scrolled near {start_time}.",
-                retry_limit=4,
-                metadata={
-                    "local_verifier": "calendar_time_axis_target_visible",
-                    "locator_strategy": "calendar_main_time_axis",
-                    "locator_kind": "generic",
-                    "event_date": event_date,
-                    "start_time": start_time,
-                },
-            ),
-            PlanStep(
-                id="wait_after_saved_event_scroll",
-                action="wait",
-                wait_seconds=0.8,
-                expected_state="Calendar settles after scrolling to the saved event time.",
-                retry_limit=1,
-                metadata={"local_verifier": "visible_screen"},
-            ),
-            PlanStep(
-                id="verify_event",
-                action="verify",
-                target_description="current calendar",
-                expected_state=f"The calendar visibly contains event title {title!r} around {event_time!r}.",
-                retry_limit=1,
-                metadata={
-                    "local_verifier": "calendar_event_visible",
-                    "event_title": title,
-                    "event_time": event_time,
-                    "event_date": event_date,
-                    "start_time": start_time,
-                    "end_time": end_time,
-                    "attendees": attendees,
-                },
-            ),
         ]
+    )
+    if has_event_time:
+        steps.extend(
+            [
+                PlanStep(
+                    id="click_saved_event_view_date",
+                    action="conditional_click",
+                    target_description="Calendar current date selector after saving an event",
+                    expected_state="Calendar date picker is opened if the saved event date is not already visible.",
+                    retry_limit=1,
+                    metadata={
+                        "local_verifier": "visible_screen",
+                        "locator_strategy": "calendar_view_date_button",
+                        "locator_kind": "button",
+                        "event_date": event_date,
+                        "skip_if_event_date_visible": True,
+                    },
+                ),
+                PlanStep(
+                    id="click_saved_event_view_day",
+                    action="conditional_click",
+                    target_description=f"Calendar saved event day {event_date}",
+                    expected_state=f"Calendar selects the saved event day {event_date}.",
+                    retry_limit=1,
+                    metadata={
+                        "local_verifier": "calendar_visible",
+                        "locator_strategy": "calendar_date_picker_day",
+                        "locator_kind": "button",
+                        "event_date": event_date,
+                        "skip_if_event_date_visible": True,
+                        "require_lark_locator": True,
+                    },
+                ),
+                PlanStep(
+                    id="scroll_saved_calendar_to_event_time",
+                    action="scroll",
+                    target_description=f"Calendar main time axis near {start_time}",
+                    scroll_amount=None,
+                    expected_state=f"Calendar time axis is scrolled near {start_time}.",
+                    retry_limit=4,
+                    metadata={
+                        "local_verifier": "calendar_time_axis_target_visible",
+                        "locator_strategy": "calendar_main_time_axis",
+                        "locator_kind": "generic",
+                        "event_title": title,
+                        "event_date": event_date,
+                        "start_time": start_time,
+                    },
+                ),
+                PlanStep(
+                    id="wait_after_saved_event_scroll",
+                    action="wait",
+                    wait_seconds=0.8,
+                    expected_state="Calendar settles after scrolling to the saved event time.",
+                    retry_limit=1,
+                    metadata={"local_verifier": "visible_screen"},
+                ),
+            ]
+        )
+    verify_metadata = {
+        "local_verifier": "calendar_event_visible",
+        "event_title": title,
+        "attendees": attendees,
+    }
+    if has_event_time:
+        verify_metadata.update(
+            {
+                "event_time": event_time,
+                "event_date": event_date,
+                "start_time": start_time,
+                "end_time": end_time,
+            }
+        )
+    steps.append(
+        PlanStep(
+            id="verify_event",
+            action="verify",
+            target_description="current calendar",
+            expected_state=(
+                f"The calendar visibly contains event title {title!r} around {event_time!r}."
+                if has_event_time
+                else f"The calendar visibly contains event title {title!r}."
+            ),
+            retry_limit=1,
+            metadata=verify_metadata,
+        )
+    )
+    time_criterion = (
+        f"Event title {title!r} and time {event_time!r} are visible after saving."
+        if has_event_time
+        else f"Event title {title!r} is visible after saving; no explicit time is set by the workflow."
     )
     return TestPlan(
         goal=case.instruction,
@@ -1657,7 +1705,7 @@ def _calendar_create_event_guarded_plan(case: TestCase) -> TestPlan:
         steps=steps,
         success_criteria=[
             f"Calendar event editor is used only when CUA_LARK_ALLOW_CALENDAR_CREATE=true.",
-            f"Event title {title!r} and time {event_time!r} are visible after saving.",
+            time_criterion,
         ],
         assumptions=[
             "Feishu/Lark is already installed and logged in.",
@@ -1897,35 +1945,6 @@ def _calendar_view_busy_free_guarded_plan(case: TestCase) -> TestPlan:
                 metadata={"local_verifier": "calendar_visible", "locator_strategy": "calendar_main_tab", "locator_kind": "button"},
             ),
             PlanStep(
-                id="click_calendar_view_date",
-                action="conditional_click",
-                target_description="Calendar current date selector",
-                expected_state="Calendar date picker is opened only if the requested date is not already visible.",
-                retry_limit=1,
-                metadata={
-                    "local_verifier": "visible_screen",
-                    "locator_strategy": "calendar_view_date_button",
-                    "locator_kind": "button",
-                    "event_date": event_date,
-                    "skip_if_event_date_visible": True,
-                },
-            ),
-            PlanStep(
-                id="click_calendar_view_day",
-                action="conditional_click",
-                target_description="Calendar requested day in date picker",
-                expected_state=f"Calendar selects the requested day {event_date} only when a date picker is open.",
-                retry_limit=1,
-                metadata={
-                    "local_verifier": "calendar_visible",
-                    "locator_strategy": "calendar_date_picker_day",
-                    "locator_kind": "button",
-                    "event_date": event_date,
-                    "skip_if_event_date_visible": True,
-                    "require_lark_locator": True,
-                },
-            ),
-            PlanStep(
                 id="focus_calendar_people_search",
                 action="click",
                 target_description="Calendar contact or public-calendar search box",
@@ -1974,7 +1993,6 @@ def _calendar_view_busy_free_guarded_plan(case: TestCase) -> TestPlan:
                     "locator_kind": "button",
                     "attendees": attendees,
                     "require_lark_locator": True,
-                    "skip_if_calendar_busy_free_visible": True,
                 },
             ),
             PlanStep(
@@ -2131,6 +2149,7 @@ def _vc_start_meeting_guarded_plan(case: TestCase) -> TestPlan:
                     "meeting_title": meeting_title,
                     "clear_before_type": True,
                     "double_click_before_type": True,
+                    "type_via_keyboard": meeting_title.isascii(),
                     "require_lark_locator": True,
                     "requires_vc_start_guard": True,
                     "preserve_foreground": True,
@@ -2150,14 +2169,13 @@ def _vc_start_meeting_guarded_plan(case: TestCase) -> TestPlan:
                 "locator_kind": "button",
                 "requires_vc_start_guard": True,
                 "dangerous_vc_start": True,
-                "skip_if_vc_in_meeting": True,
                 "preserve_foreground": True,
                 "wait_after_action_seconds": 6,
             },
         )
     )
     if has_device_request:
-        steps.extend(_vc_device_steps(case))
+        steps.extend(_vc_start_device_steps(case))
     steps.append(
         PlanStep(
             id="verify_vc_started",
@@ -2166,7 +2184,7 @@ def _vc_start_meeting_guarded_plan(case: TestCase) -> TestPlan:
             expected_state="The video meeting is created; if devices were requested, the meeting room is active.",
             retry_limit=1,
             metadata={
-                "local_verifier": "vc_in_meeting",
+                "local_verifier": "vc_device_state" if has_device_request else "vc_in_meeting",
                 "desired_camera_on": case.metadata.get("desired_camera_on"),
                 "desired_mic_on": case.metadata.get("desired_mic_on"),
                 "preserve_foreground": True,
@@ -2253,7 +2271,7 @@ def _vc_join_meeting_guarded_plan(case: TestCase) -> TestPlan:
                 retry_limit=2,
                 metadata={
                     "local_verifier": "vc_in_meeting",
-                    "locator_strategy": "vc_prejoin_join_button",
+                    "locator_strategy": "vc_join_confirm_button",
                     "locator_kind": "button",
                     "meeting_id": meeting_id,
                     "require_lark_locator": True,
@@ -2265,7 +2283,7 @@ def _vc_join_meeting_guarded_plan(case: TestCase) -> TestPlan:
             ),
         ]
     )
-    steps.extend(_vc_device_steps(case))
+    steps.extend(_vc_join_device_steps(case))
     steps.extend(
         [
             PlanStep(
@@ -2315,21 +2333,6 @@ def _vc_toggle_devices_guarded_plan(case: TestCase) -> TestPlan:
         ),
     ]
     steps.extend(_vc_device_steps(case, require_device_guard=True))
-    steps.append(
-        PlanStep(
-            id="verify_vc_device_state",
-            action="verify",
-            target_description="video meeting camera/microphone controls",
-            expected_state="Requested video meeting device states are visible.",
-            retry_limit=1,
-            metadata={
-                "local_verifier": "vc_device_state",
-                "desired_camera_on": case.metadata.get("desired_camera_on"),
-                "desired_mic_on": case.metadata.get("desired_mic_on"),
-                "preserve_foreground": True,
-            },
-        )
-    )
     return TestPlan(
         goal=case.instruction,
         product="vc",
@@ -2350,12 +2353,11 @@ def _vc_has_device_request(case: TestCase) -> bool:
 def _vc_focus_meeting_window_step(step_id: str, verifier: str, expected_state: str) -> PlanStep:
     return PlanStep(
         id=step_id,
-        action="wait",
+        action="focus_window",
         target_description="visible Feishu/Lark meeting child window",
         expected_state=expected_state,
         retry_limit=1,
-        wait_seconds=0.5,
-        metadata={"local_verifier": verifier},
+        metadata={"local_verifier": verifier, "focus_vc_meeting": True},
     )
 
 
@@ -2448,6 +2450,104 @@ def _vc_device_steps(case: TestCase, *, require_device_guard: bool = False) -> l
                     "desired_mic_on": bool(desired_mic),
                     "requires_vc_device_toggle_guard": True,
                     "dangerous_vc_device_toggle": require_device_guard,
+                    "skip_if_vc_device_state_matches": True,
+                    "preserve_foreground": True,
+                    "wait_after_action_seconds": 1,
+                },
+            )
+        )
+    return steps
+
+
+def _vc_join_device_steps(case: TestCase) -> list[PlanStep]:
+    steps: list[PlanStep] = []
+    desired_camera = case.metadata.get("desired_camera_on")
+    desired_mic = case.metadata.get("desired_mic_on")
+    if desired_camera is not None:
+        steps.append(
+            PlanStep(
+                id="set_vc_camera_state",
+                action="conditional_click",
+                target_description="joined meeting camera control",
+                expected_state=f"Camera is {'on' if desired_camera else 'off'}.",
+                retry_limit=2,
+                metadata={
+                    "local_verifier": "vc_device_state",
+                    "locator_strategy": "vc_join_camera_button",
+                    "locator_kind": "button",
+                    "desired_camera_on": bool(desired_camera),
+                    "requires_vc_device_toggle_guard": True,
+                    "dangerous_vc_device_toggle": False,
+                    "skip_if_vc_device_state_matches": True,
+                    "preserve_foreground": True,
+                    "wait_after_action_seconds": 1,
+                },
+            )
+        )
+    if desired_mic is not None:
+        steps.append(
+            PlanStep(
+                id="set_vc_mic_state",
+                action="conditional_click",
+                target_description="joined meeting microphone control",
+                expected_state=f"Microphone is {'on' if desired_mic else 'muted'}.",
+                retry_limit=2,
+                metadata={
+                    "local_verifier": "vc_device_state",
+                    "locator_strategy": "vc_join_microphone_button",
+                    "locator_kind": "button",
+                    "desired_mic_on": bool(desired_mic),
+                    "requires_vc_device_toggle_guard": True,
+                    "dangerous_vc_device_toggle": False,
+                    "skip_if_vc_device_state_matches": True,
+                    "preserve_foreground": True,
+                    "wait_after_action_seconds": 1,
+                },
+            )
+        )
+    return steps
+
+
+def _vc_start_device_steps(case: TestCase) -> list[PlanStep]:
+    steps: list[PlanStep] = []
+    desired_camera = case.metadata.get("desired_camera_on")
+    desired_mic = case.metadata.get("desired_mic_on")
+    if desired_camera is not None:
+        steps.append(
+            PlanStep(
+                id="set_vc_camera_state",
+                action="conditional_click",
+                target_description="started meeting camera control",
+                expected_state=f"Camera is {'on' if desired_camera else 'off'}.",
+                retry_limit=2,
+                metadata={
+                    "local_verifier": "vc_device_state",
+                    "locator_strategy": "vc_start_camera_button",
+                    "locator_kind": "button",
+                    "desired_camera_on": bool(desired_camera),
+                    "requires_vc_device_toggle_guard": True,
+                    "dangerous_vc_device_toggle": False,
+                    "skip_if_vc_device_state_matches": True,
+                    "preserve_foreground": True,
+                    "wait_after_action_seconds": 1,
+                },
+            )
+        )
+    if desired_mic is not None:
+        steps.append(
+            PlanStep(
+                id="set_vc_mic_state",
+                action="conditional_click",
+                target_description="started meeting microphone control",
+                expected_state=f"Microphone is {'on' if desired_mic else 'muted'}.",
+                retry_limit=2,
+                metadata={
+                    "local_verifier": "vc_device_state",
+                    "locator_strategy": "vc_start_microphone_button",
+                    "locator_kind": "button",
+                    "desired_mic_on": bool(desired_mic),
+                    "requires_vc_device_toggle_guard": True,
+                    "dangerous_vc_device_toggle": False,
                     "skip_if_vc_device_state_matches": True,
                     "preserve_foreground": True,
                     "wait_after_action_seconds": 1,

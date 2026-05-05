@@ -172,6 +172,7 @@ def parse_instruction(instruction: str, product_hint: str = "unknown") -> Parsed
     if product == "calendar" and _is_calendar_busy_free_instruction(text):
         attendee = _extract_calendar_people(text) or ["李新元"]
         event_title, event_time, _attendees = _extract_calendar_event(text)
+        event_time = _extract_calendar_busy_free_time(text) or event_time
         return ParsedIntent(
             intent="calendar_view_busy_free",
             product="calendar",
@@ -202,7 +203,7 @@ def parse_instruction(instruction: str, product_hint: str = "unknown") -> Parsed
             reason="Detected a Calendar event-time modification instruction.",
         )
 
-    if product == "calendar" and _is_calendar_invite_instruction(text) and not _is_calendar_create_instruction(text):
+    if product == "calendar" and _is_calendar_invite_instruction(text):
         event_title, event_time, attendees = _extract_calendar_event(text)
         attendees = attendees or _extract_calendar_people(text) or ["李新元"]
         return ParsedIntent(
@@ -324,7 +325,7 @@ def enrich_case_with_intent(case: TestCase) -> TestCase:
 def _parse_im_intent(text: str, no_send: bool) -> ParsedIntent:
     if _contains_any(text, ["创建群", "新建群", "建群", "拉群", "创建群组", "create group"]) or re.search(r"创建.*群", text):
         members = _extract_people_list(text) or ["李新元"]
-        group_name = _extract_named_value(text, ["群名", "群名称", "名称", "名字"])
+        group_name = _extract_title_value(text, entity_words=("群", "群组")) or _extract_named_value(text, ["群名", "群名称", "名称", "名字"])
         return ParsedIntent(
             intent="im_create_group",
             product="im",
@@ -543,6 +544,9 @@ def _extract_group_target(text: str) -> str | None:
 
 
 def _extract_search_target(text: str) -> str | None:
+    typed_query = _extract_typed_search_query(text)
+    if typed_query:
+        return typed_query
     patterns = [
         r"(?:搜索|查找|找到|find|search)\s*[\"'“”‘’「」『』]?([^，。；;、\s\"'“”‘’「」『』]+)",
         r"(?:打开|进入)\s*[\"'“”‘’「」『』]?([^，。；;、\s\"'“”‘’「」『』]+)\s*(?:聊天|会话|群)",
@@ -552,8 +556,38 @@ def _extract_search_target(text: str) -> str | None:
         if match:
             candidate = _strip_punctuation(match.group(1))
             candidate = re.sub(r"^(?:艾特|提及|mention)", "", candidate, flags=re.IGNORECASE).strip()
+            if _is_search_ui_label(candidate):
+                continue
             return candidate or None
     return None
+
+
+def _extract_typed_search_query(text: str) -> str | None:
+    if not _contains_any(text, ["搜索框", "搜索栏", "搜索输入框", "search box", "search input"]):
+        return None
+    patterns = [
+        r"(?:输入|键入|填入|录入|type|enter)\s*([\"'“”‘’「」『』])(.+?)([\"'“”‘’「」『』])",
+        r"(?:输入|键入|填入|录入|type|enter)\s*[:：]?\s*([^，。；;、\s\"'“”‘’「」『』]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        if len(match.groups()) >= 3:
+            if not _is_matching_quote(match.group(1), match.group(3)):
+                continue
+            candidate = match.group(2)
+        else:
+            candidate = match.group(1)
+        candidate = _strip_punctuation(candidate)
+        if candidate and not _is_search_ui_label(candidate):
+            return candidate
+    return None
+
+
+def _is_search_ui_label(candidate: str | None) -> bool:
+    normalized = re.sub(r"\s+", "", candidate or "").lower()
+    return normalized in {"框", "搜索框", "搜索栏", "搜索输入框", "searchbox", "searchinput"}
 
 
 def _extract_search_text(text: str) -> str | None:
@@ -650,6 +684,70 @@ def _extract_named_value(text: str, names: list[str]) -> str | None:
     if match:
         return _strip_punctuation(match.group(1))
     return None
+
+
+def _extract_title_value(text: str, *, entity_words: tuple[str, ...] = ()) -> str | None:
+    label_words = (
+        "标题",
+        "名称",
+        "名字",
+        "题目",
+        "会议标题",
+        "会议名称",
+        "日程标题",
+        "日程名称",
+        "文档标题",
+        "文档名称",
+        "群名",
+        "群名称",
+    )
+    label_pattern = "|".join(re.escape(item) for item in label_words)
+    quoted_match = re.search(
+        rf"(?:{label_pattern})\s*(?:为|是|叫|:|：)\s*([\"'“”‘’「」『』])(.+?)([\"'“”‘’「」『』])",
+        text,
+        re.IGNORECASE,
+    )
+    if quoted_match and _is_matching_quote(quoted_match.group(1), quoted_match.group(3)):
+        return _strip_common(quoted_match.group(2))
+
+    quoted_name_match = re.search(
+        r"(?:名为|叫做|命名为|取名为|叫)\s*([\"'“”‘’「」『』])(.+?)([\"'“”‘’「」『』])",
+        text,
+        re.IGNORECASE,
+    )
+    if quoted_name_match and _is_matching_quote(quoted_name_match.group(1), quoted_name_match.group(3)):
+        return _strip_common(quoted_name_match.group(2))
+
+    stop_words = ("，", "。", "；", ";", "\n")
+    unquoted_match = re.search(
+        rf"(?:{label_pattern})\s*(?:为|是|叫|:|：)\s*([^，。；;\n\"'“”‘’「」『』]+)",
+        text,
+        re.IGNORECASE,
+    )
+    if unquoted_match:
+        return _clean_extracted_title(unquoted_match.group(1), entity_words)
+
+    unquoted_name_match = re.search(
+        r"(?:名为|叫做|命名为|取名为|叫)\s*([^，。；;\n\"'“”‘’「」『』]+)",
+        text,
+        re.IGNORECASE,
+    )
+    if unquoted_name_match:
+        return _clean_extracted_title(unquoted_name_match.group(1), entity_words)
+
+    return None
+
+
+def _clean_extracted_title(raw: str, entity_words: tuple[str, ...] = ()) -> str | None:
+    cleaned = _strip_common(raw)
+    if not cleaned:
+        return None
+    for word in entity_words:
+        if not word:
+            continue
+        cleaned = re.sub(rf"(?:的)?{re.escape(word)}$", "", cleaned).strip()
+    cleaned = re.sub(r"(?:的)?(?:日程|会议|文档|云文档|群|群组)$", "", cleaned).strip()
+    return _strip_common(cleaned)
 
 
 def _is_matching_quote(left: str, right: str) -> bool:
@@ -751,21 +849,32 @@ def _extract_share_recipient(text: str) -> str | None:
 
 
 def _extract_doc_content(text: str) -> tuple[str | None, str | None]:
-    title = None
+    title = _extract_title_value(text, entity_words=("云文档", "文档"))
     for pattern in [
         r"(?:标题(?:为|是|叫|：|:)|题目(?:为|是|叫|：|:)|名为|叫做)\s*[\"'“”‘’「」『』]?([^，。；;\n\"'“”‘’「」『』]+)",
         r"(?:创建|新建)(?:一个|一篇)?(?:测试)?(?:云文档|文档)?\s*[\"'“”‘’「」『』]?([^，。；;\n\"'“”‘’「」『』]+)",
     ]:
+        if title is not None:
+            break
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             title = _strip_common(match.group(1))
             break
 
     body = None
+    quoted_body = re.search(
+        r"(?:正文|内容|文档内容|body)\s*(?:为|是|写入|输入|：|:)?\s*([\"'“”‘’「」『』])(.+?)([\"'“”‘’「」『』])",
+        text,
+        re.IGNORECASE,
+    )
+    if quoted_body and _is_matching_quote(quoted_body.group(1), quoted_body.group(3)):
+        body = _strip_common(quoted_body.group(2))
     for pattern in [
         r"(?:正文|内容|文档内容|body)\s*(?:为|是|写入|输入|：|:)?\s*(.+)$",
         r"(?:写入|输入)\s*(.+)$",
     ]:
+        if body is not None:
+            break
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             body = _strip_common(match.group(1))
@@ -825,9 +934,25 @@ def _extract_calendar_people(text: str) -> list[str]:
     ]
 
 
+def _extract_calendar_busy_free_time(text: str) -> str | None:
+    match = re.search(
+        r"((?:今天|明天|后天|下周|周[一二三四五六日天]|星期[一二三四五六日天])\s*(?:上午|下午|晚上|中午)?\s*\d{1,2}[:：]\d{2})",
+        text,
+    )
+    if match:
+        return _strip_common(match.group(1).replace("：", ":"))
+    match = re.search(
+        r"((?:今天|明天|后天|下周|周[一二三四五六日天]|星期[一二三四五六日天])\s*(?:上午|下午|晚上|中午)?\s*\d{1,2}点(?:\d{1,2}分)?)",
+        text,
+    )
+    if match:
+        return _strip_common(match.group(1))
+    return None
+
+
 def _extract_new_event_time(text: str) -> str | None:
     for pattern in [
-        r"(?:改到|调整到|修改为|变更为|移动到)\s*([^，。；;\n]+)",
+        r"(?:改到|调整到|修改为|变更为|移动到)\s*([^，。；;\n]+?)(?:并保存|保存|$)",
         r"(?:新时间|新的时间)\s*(?:为|是|：|:)?\s*([^，。；;\n]+)",
     ]:
         match = re.search(pattern, text, re.IGNORECASE)
@@ -837,19 +962,23 @@ def _extract_new_event_time(text: str) -> str | None:
 
 
 def _extract_calendar_event(text: str) -> tuple[str | None, str | None, list[str]]:
-    title = None
+    title = _extract_title_value(text, entity_words=("日程", "会议"))
     for pattern in [
-        r"(?:会议|日程)(?:标题|名称)?(?:为|是|叫|：|:)?\s*[\"'“”‘’「」『』]?([^，。；;\n\"'“”‘’「」『』]+)",
+        r"(?:创建|新建|安排|预约)(?:一个|一场)?(?:测试)?(?:会议|日程)\s*[\"'“”‘’「」『』]([^，。；;\n\"'“”‘’「」『』]+)[\"'“”‘’「」『』]?",
         r"(?:标题|名称)(?:为|是|叫|：|:)\s*[\"'“”‘’「」『』]?([^，。；;\n\"'“”‘’「」『』]+)",
     ]:
+        if title is not None:
+            break
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            title = _strip_common(match.group(1))
+            title = _clean_extracted_title(match.group(1), ("日程", "会议"))
             break
 
     time_phrase = None
     for pattern in [
-        r"(?:时间|在|安排到|安排在)(?:为|是|：|:)?\s*([^，。；;\n]+)",
+        r"(?:时间)(?:为|是|：|:)\s*([^，。；;\n]+)",
+        r"(?:先设为|先设置为|原时间(?:为|是|：|:)|从)\s*([^，。；;\n]+?)(?:，|,|然后|再|并|修改|改到|调整|$)",
+        r"(?:安排到|安排在)\s*([^，。；;\n]+)",
         r"((?:今天|明天|后天|下周|周[一二三四五六日天]|星期[一二三四五六日天]|\d{1,2}[月/-]\d{1,2}[日号]?).{0,18}(?:\d{1,2}[:：]\d{2}|\d{1,2}点|上午|下午|晚上|中午).{0,18})",
     ]:
         match = re.search(pattern, text, re.IGNORECASE)
@@ -858,7 +987,15 @@ def _extract_calendar_event(text: str) -> tuple[str | None, str | None, list[str
             break
 
     attendees: list[str] = []
-    attendee_match = re.search(r"(?:参会人|参与人|邀请|参会人列表)\s*(?:为|是|：|:)?\s*[\"'“”‘’「」『』]?(.+?)(?:[\"'“”‘’「」『』]?(?:参加|参会|开会)|$)", text)
+    attendee_match = re.search(
+        r"(?:参会人|参与人|参会人列表)\s*(?:为|是|：|:)?\s*[\"'“”‘’「」『』]?(.+?)(?:[\"'“”‘’「」『』]?(?:参加|参会|开会)|[，。；;\n]|$)",
+        text,
+    )
+    if attendee_match is None:
+        attendee_match = re.search(
+            r"(?:并|，|,|。|；|;)\s*邀请\s*[\"'“”‘’「」『』]?(.+?)(?:[\"'“”‘’「」『』]?(?:参加|参会|开会)|[，。；;\n]|$)",
+            text,
+        )
     if attendee_match:
         attendees = [
             item
@@ -875,13 +1012,12 @@ def _is_vc_start_instruction(text: str) -> bool:
             "发起会议",
             "开始会议",
             "新会议",
-            "视频会议",
             "start meeting",
             "start a meeting",
             "new meeting",
         ],
     )
-    natural_start = "发起" in text and "会议" in text
+    natural_start = _contains_any(text, ["发起", "开始", "新建", "创建"]) and "会议" in text
     return (direct_start or natural_start) and not _is_vc_join_instruction(text)
 
 
@@ -935,9 +1071,9 @@ def _extract_vc_meeting_id(text: str) -> str | None:
 
 
 def _extract_vc_meeting_title(text: str) -> str | None:
-    quoted = _quoted_items(text)
-    if quoted and _contains_any(text, ["名为", "名字", "名称", "标题", "叫做", "叫"]):
-        return _strip_common(quoted[0])
+    title = _extract_title_value(text, entity_words=("视频会议", "会议"))
+    if title:
+        return title
     for pattern in (
         r"(?:名为|叫做|叫)\s*[\"'“”‘’「」『』]?([^，。；;\n\"'“”‘’「」『』]+)",
         r"(?:会议名称|会议名|会议标题|名称|名字|标题)\s*(?:为|是|叫|:|：)\s*[\"'“”‘’「」『』]?([^，。；;\n\"'“”‘’「」『』]+)",
